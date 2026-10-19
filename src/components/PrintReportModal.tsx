@@ -102,7 +102,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
         </div>
 
         {/* Printable Document Sheet Content */}
-        <div className="p-8 sm:p-12 space-y-6 text-slate-800 font-sans print:p-4">
+        <div className="p-8 sm:p-12 space-y-6 text-slate-800 font-battambang print:p-4">
           {/* Header */}
           <div className="border-b-2 border-slate-900 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">

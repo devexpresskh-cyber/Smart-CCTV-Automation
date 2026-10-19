@@ -1940,7 +1940,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
 
   return (
     <div className="bg-white text-slate-950 rounded-2xl shadow-xl overflow-hidden print:p-0 print:m-0 print:border-none print-page border border-slate-300">
-      <div className="p-6 sm:p-8 space-y-4 text-xs font-sans">
+      <div className="p-6 sm:p-8 space-y-4 text-xs font-battambang">
         {/* Header (TK Garment Sisophon Co., Ltd.) */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-3">
           <div className="flex items-center gap-3">
