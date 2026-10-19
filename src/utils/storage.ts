@@ -138,8 +138,11 @@ export const getStoredDVRProfiles = (): any[] => {
  */
 export const hydrateDVRProfilesWithIDB = async (profiles: any[]): Promise<any[]> => {
   try {
+    const freshest = getStoredDVRProfiles();
+    const sourceProfiles = (freshest && freshest.length > 0) ? freshest : profiles;
+
     const hydrated = await Promise.all(
-      profiles.map(async p => {
+      sourceProfiles.map(async p => {
         let dayUrl = p.dayScreenshotUrl;
         let nightUrl = p.nightScreenshotUrl;
 
@@ -157,6 +160,7 @@ export const hydrateDVRProfilesWithIDB = async (profiles: any[]): Promise<any[]>
           ...p,
           dayScreenshotUrl: dayUrl,
           nightScreenshotUrl: nightUrl,
+          cameras: p.cameras, // explicitly preserve camera list
         };
       })
     );

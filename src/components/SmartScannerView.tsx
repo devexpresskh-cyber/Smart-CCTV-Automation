@@ -108,6 +108,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   const [editDvrChannelCount, setEditDvrChannelCount] = useState<number>(16);
 
   const [editingCameraIndex, setEditingCameraIndex] = useState<number | null>(null);
+  const [editingDvrId, setEditingDvrId] = useState<string | null>(null);
   const [editCamNameThai, setEditCamNameThai] = useState('');
   const [editCamNameKm, setEditCamNameKm] = useState('');
 
@@ -129,6 +130,17 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   const showFeedback = (msg: string) => {
     setFeedbackToast(msg);
     setTimeout(() => setFeedbackToast(null), 3500);
+  };
+
+  // Persist DVR profiles in local storage & IndexedDB safely with functional updater support
+  const saveDVRProfiles = (
+    updater: DVRProfile[] | ((prev: DVRProfile[]) => DVRProfile[])
+  ) => {
+    setDvrProfiles(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      setStoredDVRProfiles(next);
+      return next;
+    });
   };
 
   const handleOpenDvrStatusModal = (dvrId?: string) => {
@@ -163,46 +175,66 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   };
 
   const handleUpdateDvrCheck = (targetDvrId: string, partialCheck: Partial<DVRCheckStatus>, applyToAll = false) => {
-    const updated = dvrProfiles.map(p => {
-      if (applyToAll || p.id === targetDvrId) {
-        const base = p.dvrCheck || defaultDVRCheck;
-        return {
-          ...p,
-          dvrCheck: {
-            ...base,
-            ...partialCheck,
-          },
-        };
-      }
-      return p;
+    saveDVRProfiles(prev => {
+      return prev.map(p => {
+        if (applyToAll || p.id === targetDvrId) {
+          const base = p.dvrCheck || defaultDVRCheck;
+          return {
+            ...p,
+            cameras: p.cameras, // explicitly preserve camera location names and items
+            dvrCheck: {
+              ...base,
+              ...partialCheck,
+            },
+          };
+        }
+        return p;
+      });
     });
-    saveDVRProfiles(updated);
     showFeedback(
       applyToAll
         ? '✅ បានធ្វើបច្ចុប្បន្នភាពស្ថានភាព DVR/NVR គ្រប់អង្គភាពទាំងអស់!'
-        : `✅ បានកែប្រែស្ថានភាព Recorder សម្រាប់ ${dvrProfiles.find(d => d.id === targetDvrId)?.name || 'DVR'}!`
+        : `✅ បានកែប្រែស្ថានភាព Recorder!`
     );
   };
 
   const handlePacketToggleCheck = (dvrId: string, camNumber: number, shift: 'day' | 'night') => {
-    const updated = dvrProfiles.map(p => {
-      if (p.id === dvrId) {
-        const updatedCams = p.cameras.map(c => {
-          if (c.number === camNumber) {
-            const next = shift === 'day'
-              ? (c.dayStatus === 'ok' ? 'issue' : 'ok')
-              : (c.nightStatus === 'ok' ? 'issue' : 'ok');
-            return shift === 'day'
-              ? { ...c, dayStatus: next as 'ok' | 'issue' }
-              : { ...c, nightStatus: next as 'ok' | 'issue' };
-          }
-          return c;
-        });
-        return { ...p, cameras: updatedCams };
+    saveDVRProfiles(prev => {
+      const updated = prev.map(p => {
+        if (p.id === dvrId) {
+          const updatedCams = p.cameras.map(c => {
+            if (c.number === camNumber) {
+              const next = shift === 'day'
+                ? (c.dayStatus === 'ok' ? 'issue' : 'ok')
+                : (c.nightStatus === 'ok' ? 'issue' : 'ok');
+              return {
+                ...c,
+                dayStatus: shift === 'day' ? next as 'ok' | 'issue' : c.dayStatus,
+                nightStatus: shift === 'night' ? next as 'ok' | 'issue' : c.nightStatus,
+              };
+            }
+            return c;
+          });
+          const faultyC = updatedCams.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length;
+          return {
+            ...p,
+            cameras: updatedCams,
+            workingCount: p.channelCount - faultyC,
+            faultyCount: faultyC,
+          };
+        }
+        return p;
+      });
+
+      if (dvrId === activeDvrId) {
+        const activeOne = updated.find(d => d.id === activeDvrId);
+        if (activeOne) {
+          setCameras(activeOne.cameras);
+        }
       }
-      return p;
+
+      return updated;
     });
-    saveDVRProfiles(updated);
   };
 
   // Grid dimensions calculator for any channel number
@@ -223,11 +255,22 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     return { cols, rows };
   };
 
-  // Hydrate full screenshots from IndexedDB on startup
+  // Hydrate full screenshots from IndexedDB on startup without overwriting camera names
   useEffect(() => {
     hydrateDVRProfilesWithIDB(dvrProfiles).then(hydrated => {
       if (hydrated && hydrated.length > 0) {
-        setDvrProfiles(hydrated);
+        setDvrProfiles(current => {
+          return current.map(curr => {
+            const h = hydrated.find(x => x.id === curr.id);
+            if (!h) return curr;
+            return {
+              ...curr,
+              dayScreenshotUrl: curr.dayScreenshotUrl || h.dayScreenshotUrl,
+              nightScreenshotUrl: curr.nightScreenshotUrl || h.nightScreenshotUrl,
+              cameras: curr.cameras, // Keep camera names, locations, statuses 100% intact!
+            };
+          });
+        });
       }
     });
   }, []);
@@ -242,13 +285,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
       setDayScreenshot(activeDvr.dayScreenshotUrl || generateSampleMonitor(activeDvr.channelCount, activeDvr.name, 'day'));
       setNightScreenshot(activeDvr.nightScreenshotUrl || generateSampleMonitor(activeDvr.channelCount, activeDvr.name, 'night'));
     }
-  }, [activeDvrId]);
-
-  // Persist DVR profiles in local storage & IndexedDB
-  const saveDVRProfiles = (updated: DVRProfile[]) => {
-    setDvrProfiles(updated);
-    setStoredDVRProfiles(updated);
-  };
+  }, [activeDvrId, dvrProfiles]);
 
   // High-fidelity SMART PSS Monitor Simulation for Day or Night (compact ~25KB JPEG)
   function generateSampleMonitor(chCount: number, dvrName: string, shift: 'day' | 'night'): string {
@@ -415,7 +452,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     const cellW = gridW / colsCount;
     const cellH = gridH / rowsCount;
 
-    const updatedCameras = [...cameras];
+    const resultsMap: Record<number, { isBlackScreen: boolean }> = {};
 
     for (let idx = 0; idx < totalCh; idx++) {
       const r = Math.floor(idx / colsCount);
@@ -449,36 +486,45 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
         console.error(e);
       }
 
-      if (updatedCameras[idx]) {
-        if (targetShift === 'day') {
-          updatedCameras[idx].dayStatus = isBlackScreen ? 'issue' : 'ok';
-        } else {
-          updatedCameras[idx].nightStatus = isBlackScreen ? 'issue' : 'ok';
-        }
-
-        if (isBlackScreen) {
-          updatedCameras[idx].symptom = 'អេក្រង់ខ្មៅ (หน้าจอภาพไม่แสดงภาพ / Black screen)';
-        }
-      }
+      resultsMap[idx] = { isBlackScreen };
     }
 
     setTimeout(() => {
-      setCameras(updatedCameras);
+      saveDVRProfiles(prev => {
+        const targetDvr = prev.find(d => d.id === activeDvrId);
+        if (!targetDvr) return prev;
 
-      const faultyCount = updatedCameras.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length;
-      const updatedProfiles = dvrProfiles.map(d =>
-        d.id === activeDvrId
-          ? {
-              ...d,
-              cameras: updatedCameras,
-              dayScreenshotUrl: targetShift === 'day' ? imgElement.src : d.dayScreenshotUrl,
-              nightScreenshotUrl: targetShift === 'night' ? imgElement.src : d.nightScreenshotUrl,
-              workingCount: totalCh - faultyCount,
-              faultyCount,
-            }
-          : d
-      );
-      saveDVRProfiles(updatedProfiles);
+        // Preserve all existing camera names and properties, update only shift status!
+        const updatedCameras = targetDvr.cameras.map((cam, idx) => {
+          if (idx < totalCh && resultsMap[idx]) {
+            const isBlack = resultsMap[idx].isBlackScreen;
+            return {
+              ...cam,
+              dayStatus: targetShift === 'day' ? (isBlack ? 'issue' : 'ok') : cam.dayStatus,
+              nightStatus: targetShift === 'night' ? (isBlack ? 'issue' : 'ok') : cam.nightStatus,
+              symptom: isBlack ? 'អេក្រង់ខ្មៅ (หน้าจอภาพไม่แสดงภาพ / Black screen)' : cam.symptom,
+            };
+          }
+          return cam;
+        });
+
+        setCameras(updatedCameras);
+
+        const faultyCount = updatedCameras.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length;
+        return prev.map(d =>
+          d.id === activeDvrId
+            ? {
+                ...d,
+                cameras: updatedCameras,
+                dayScreenshotUrl: targetShift === 'day' ? imgElement.src : d.dayScreenshotUrl,
+                nightScreenshotUrl: targetShift === 'night' ? imgElement.src : d.nightScreenshotUrl,
+                workingCount: totalCh - faultyCount,
+                faultyCount,
+              }
+            : d
+        );
+      });
+
       targetShift === 'day' ? setIsAnalyzingDay(false) : setIsAnalyzingNight(false);
       showFeedback(`✓ ស្កេនរូបថត ${targetShift === 'day' ? 'ពេលថ្ងៃ' : 'ពេលយប់'} និង Update Checklist រួចរាល់!`);
     }, 400);
@@ -529,17 +575,19 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
   // One-click: Auto-generate Sample Screenshots & Audit for ALL DVRs!
   const handlePreloadAllDVRs = () => {
-    const updated = dvrProfiles.map(dvr => {
-      const dayImg = generateSampleMonitor(dvr.channelCount, dvr.name, 'day');
-      const nightImg = generateSampleMonitor(dvr.channelCount, dvr.name, 'night');
-      return {
-        ...dvr,
-        dayScreenshotUrl: dayImg,
-        nightScreenshotUrl: nightImg,
-      };
+    saveDVRProfiles(prev => {
+      return prev.map(dvr => {
+        const dayImg = generateSampleMonitor(dvr.channelCount, dvr.name, 'day');
+        const nightImg = generateSampleMonitor(dvr.channelCount, dvr.name, 'night');
+        return {
+          ...dvr,
+          dayScreenshotUrl: dayImg,
+          nightScreenshotUrl: nightImg,
+          cameras: dvr.cameras, // explicitly keep camera names
+        };
+      });
     });
 
-    saveDVRProfiles(updated);
     if (activeDvr) {
       setDayScreenshot(generateSampleMonitor(activeDvr.channelCount, activeDvr.name, 'day'));
       setNightScreenshot(generateSampleMonitor(activeDvr.channelCount, activeDvr.name, 'night'));
@@ -550,18 +598,19 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   // Save current screenshots to weekly checklist archive
   const handleSaveToWeeklyChecklist = () => {
     // Sync current active DVR to profiles
-    const updatedProfiles = dvrProfiles.map(d =>
-      d.id === activeDvrId
-        ? {
-            ...d,
-            cameras,
-            dayScreenshotUrl: dayScreenshot || d.dayScreenshotUrl,
-            nightScreenshotUrl: nightScreenshot || d.nightScreenshotUrl,
-            lastCheckedDate: inspectionDate,
-          }
-        : d
-    );
-    saveDVRProfiles(updatedProfiles);
+    saveDVRProfiles(prev => {
+      return prev.map(d =>
+        d.id === activeDvrId
+          ? {
+              ...d,
+              cameras,
+              dayScreenshotUrl: dayScreenshot || d.dayScreenshotUrl,
+              nightScreenshotUrl: nightScreenshot || d.nightScreenshotUrl,
+              lastCheckedDate: inspectionDate,
+            }
+          : d
+      );
+    });
 
     if (onSyncWithSystem) {
       const report: SmartInspectionReport = {
@@ -604,69 +653,79 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
   // Toggle single camera checklist status
   const handleToggleCheck = (camNumber: number, shift: 'day' | 'night') => {
-    const updated = cameras.map(c => {
-      if (c.number === camNumber) {
-        if (shift === 'day') {
-          const next = c.dayStatus === 'ok' ? 'issue' : 'ok';
-          return { ...c, dayStatus: next as 'ok' | 'issue' };
-        } else {
-          const next = c.nightStatus === 'ok' ? 'issue' : 'ok';
-          return { ...c, nightStatus: next as 'ok' | 'issue' };
-        }
-      }
-      return c;
-    });
+    saveDVRProfiles(prev => {
+      const targetDvr = prev.find(d => d.id === activeDvrId);
+      const baseCams = targetDvr?.cameras || cameras;
 
-    setCameras(updated);
-    const faultyC = updated.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length;
-    const updatedProfiles = dvrProfiles.map(d =>
-      d.id === activeDvrId
-        ? { ...d, cameras: updated, workingCount: channelCount - faultyC, faultyCount: faultyC }
-        : d
-    );
-    saveDVRProfiles(updatedProfiles);
+      const updated = baseCams.map(c => {
+        if (c.number === camNumber) {
+          if (shift === 'day') {
+            const next = c.dayStatus === 'ok' ? 'issue' : 'ok';
+            return { ...c, dayStatus: next as 'ok' | 'issue' };
+          } else {
+            const next = c.nightStatus === 'ok' ? 'issue' : 'ok';
+            return { ...c, nightStatus: next as 'ok' | 'issue' };
+          }
+        }
+        return c;
+      });
+
+      setCameras(updated);
+      const faultyC = updated.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length;
+
+      return prev.map(d =>
+        d.id === activeDvrId
+          ? { ...d, cameras: updated, workingCount: d.channelCount - faultyC, faultyCount: faultyC }
+          : d
+      );
+    });
   };
 
   // Quick Channel Count Resizing on Active DVR
   const handleQuickChannelResize = (newCount: number) => {
     const dims = getGridDims(newCount);
-    let newCamList: SmartReportCamera[] = [];
 
-    for (let i = 1; i <= newCount; i++) {
-      const existing = cameras.find(c => c.number === i);
-      if (existing) {
-        newCamList.push(existing);
-      } else {
-        newCamList.push({
-          number: i,
-          nameThai: `กล้อง ${activeDvr.name} จุดที่ ${i}`,
-          nameKm: `កាមេរ៉ា ${activeDvr.name} ចំណុចទី ${i}`,
-          nameEn: `${activeDvr.name} Cam ${i}`,
-          dayStatus: 'ok',
-          nightStatus: 'ok',
-        });
+    saveDVRProfiles(prev => {
+      const targetDvr = prev.find(d => d.id === activeDvrId);
+      const existingCams = targetDvr?.cameras || cameras;
+
+      let newCamList: SmartReportCamera[] = [];
+      for (let i = 1; i <= newCount; i++) {
+        const existing = existingCams.find(c => c.number === i);
+        if (existing) {
+          newCamList.push(existing);
+        } else {
+          newCamList.push({
+            number: i,
+            nameThai: `กล้อง ${targetDvr?.name || activeDvr.name} จุดที่ ${i}`,
+            nameKm: `កាមេរ៉ា ${targetDvr?.name || activeDvr.name} ចំណុចទី ${i}`,
+            nameEn: `${targetDvr?.name || activeDvr.name} Cam ${i}`,
+            dayStatus: 'ok',
+            nightStatus: 'ok',
+          });
+        }
       }
-    }
 
-    setChannelCount(newCount);
-    setGridCols(dims.cols);
-    setGridRows(dims.rows);
-    setCameras(newCamList);
+      setChannelCount(newCount);
+      setGridCols(dims.cols);
+      setGridRows(dims.rows);
+      setCameras(newCamList);
 
-    const updatedProfiles = dvrProfiles.map(d =>
-      d.id === activeDvrId
-        ? {
-            ...d,
-            channelCount: newCount,
-            gridCols: dims.cols,
-            gridRows: dims.rows,
-            cameras: newCamList,
-            workingCount: newCamList.filter(c => c.dayStatus === 'ok' && c.nightStatus === 'ok').length,
-            faultyCount: newCamList.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length,
-          }
-        : d
-    );
-    saveDVRProfiles(updatedProfiles);
+      return prev.map(d =>
+        d.id === activeDvrId
+          ? {
+              ...d,
+              channelCount: newCount,
+              gridCols: dims.cols,
+              gridRows: dims.rows,
+              cameras: newCamList,
+              workingCount: newCamList.filter(c => c.dayStatus === 'ok' && c.nightStatus === 'ok').length,
+              faultyCount: newCamList.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length,
+            }
+          : d
+      );
+    });
+
     showFeedback(`✓ បានកែប្រែ DVR ទៅជា ${newCount} Channels រួចរាល់!`);
   };
 
@@ -701,8 +760,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
       nightScreenshotUrl: generateSampleMonitor(newDvrChannelCount, newDvrName, 'night'),
     };
 
-    const updated = [...dvrProfiles, newProfile];
-    saveDVRProfiles(updated);
+    saveDVRProfiles(prev => [...prev, newProfile]);
     setActiveDvrId(newId);
     setIsAddDvrModalOpen(false);
     setNewDvrName('');
@@ -723,42 +781,47 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     e.preventDefault();
     const dims = getGridDims(editDvrChannelCount);
 
-    let updatedCamList: SmartReportCamera[] = [];
-    for (let i = 1; i <= editDvrChannelCount; i++) {
-      const existing = cameras.find(c => c.number === i);
-      if (existing) {
-        updatedCamList.push(existing);
-      } else {
-        updatedCamList.push({
-          number: i,
-          nameThai: `กล้อง ${editDvrName} จุดที่ ${i}`,
-          nameKm: `កាមេរ៉ា ${editDvrName} ចំណុចទី ${i}`,
-          nameEn: `${editDvrName} Cam ${i}`,
-          dayStatus: 'ok',
-          nightStatus: 'ok',
-        });
+    saveDVRProfiles(prev => {
+      const targetDvr = prev.find(d => d.id === activeDvrId);
+      const existingCams = targetDvr?.cameras || cameras;
+
+      let updatedCamList: SmartReportCamera[] = [];
+      for (let i = 1; i <= editDvrChannelCount; i++) {
+        const existing = existingCams.find(c => c.number === i);
+        if (existing) {
+          updatedCamList.push(existing);
+        } else {
+          updatedCamList.push({
+            number: i,
+            nameThai: `กล้อง ${editDvrName} จุดที่ ${i}`,
+            nameKm: `កាមេរ៉ា ${editDvrName} ចំណុចទី ${i}`,
+            nameEn: `${editDvrName} Cam ${i}`,
+            dayStatus: 'ok',
+            nightStatus: 'ok',
+          });
+        }
       }
-    }
 
-    const updated = dvrProfiles.map(d =>
-      d.id === activeDvrId
-        ? {
-            ...d,
-            name: editDvrName,
-            locationKm: editDvrLocationKm,
-            channelCount: editDvrChannelCount,
-            gridCols: dims.cols,
-            gridRows: dims.rows,
-            cameras: updatedCamList,
-          }
-        : d
-    );
+      setChannelCount(editDvrChannelCount);
+      setGridCols(dims.cols);
+      setGridRows(dims.rows);
+      setCameras(updatedCamList);
 
-    saveDVRProfiles(updated);
-    setChannelCount(editDvrChannelCount);
-    setGridCols(dims.cols);
-    setGridRows(dims.rows);
-    setCameras(updatedCamList);
+      return prev.map(d =>
+        d.id === activeDvrId
+          ? {
+              ...d,
+              name: editDvrName,
+              locationKm: editDvrLocationKm,
+              channelCount: editDvrChannelCount,
+              gridCols: dims.cols,
+              gridRows: dims.rows,
+              cameras: updatedCamList,
+            }
+          : d
+      );
+    });
+
     setIsEditDvrModalOpen(false);
     showFeedback('✓ បានកែប្រែព័ត៌មាន DVR រួចរាល់!');
   };
@@ -770,34 +833,48 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
       return;
     }
     if (confirm(`តើអ្នកពិតជាចង់លុប DVR "${activeDvr.name}" មែនទេ?`)) {
-      const updated = dvrProfiles.filter(d => d.id !== dvrId);
-      saveDVRProfiles(updated);
-      setActiveDvrId(updated[0].id);
+      saveDVRProfiles(prev => {
+        const updated = prev.filter(d => d.id !== dvrId);
+        setActiveDvrId(updated[0].id);
+        return updated;
+      });
       showFeedback('✓ បានលុប DVR រួចរាល់!');
     }
   };
 
-  // Save edited camera location name
-  const handleSaveCameraName = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Save edited camera location name (จุดตั้งกล้อง / ទីតាំងកាមេរ៉ា)
+  const handleSaveCameraName = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (editingCameraIndex === null) return;
 
-    const updated = cameras.map((c, i) =>
-      i === editingCameraIndex
-        ? {
-            ...c,
-            nameThai: editCamNameThai || c.nameThai,
-            nameKm: editCamNameKm || c.nameKm,
-          }
-        : c
-    );
-    setCameras(updated);
+    const targetDvrId = editingDvrId || activeDvrId;
 
-    const updatedProfiles = dvrProfiles.map(d =>
-      d.id === activeDvrId ? { ...d, cameras: updated } : d
-    );
-    saveDVRProfiles(updatedProfiles);
+    saveDVRProfiles(prev => {
+      const targetDvr = prev.find(d => d.id === targetDvrId);
+      if (!targetDvr) return prev;
+
+      const updatedCams = targetDvr.cameras.map((c, i) =>
+        i === editingCameraIndex
+          ? {
+              ...c,
+              nameThai: editCamNameThai.trim() !== '' ? editCamNameThai.trim() : c.nameThai,
+              nameKm: editCamNameKm.trim() !== '' ? editCamNameKm.trim() : c.nameKm,
+            }
+          : c
+      );
+
+      if (targetDvrId === activeDvrId) {
+        setCameras(updatedCams);
+      }
+
+      return prev.map(d =>
+        d.id === targetDvrId ? { ...d, cameras: updatedCams } : d
+      );
+    });
+
     setEditingCameraIndex(null);
+    setEditingDvrId(null);
+    showFeedback('✓ បានរក្សាទុកចំណុចទីតាំងកាមេរ៉ា (ទីតាំងកាមេរ៉ា) ដោយជោគជ័យ!');
   };
 
   // Channel preset buttons list
@@ -1264,6 +1341,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             nightScreenshot={nightScreenshot}
             onToggleCheck={handleToggleCheck}
             onEditCamera={idx => {
+              setEditingDvrId(activeDvr.id);
               setEditingCameraIndex(idx);
               setEditCamNameThai(cameras[idx].nameThai);
               setEditCamNameKm(cameras[idx].nameKm);
@@ -1306,6 +1384,12 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                   pageNumber={idx + 1}
                   isMultiPagePacket
                   onToggleCheck={(camNum, shift) => handlePacketToggleCheck(dvr.id, camNum, shift)}
+                  onEditCamera={camIdx => {
+                    setEditingDvrId(dvr.id);
+                    setEditingCameraIndex(camIdx);
+                    setEditCamNameThai(dvr.cameras[camIdx].nameThai);
+                    setEditCamNameKm(dvr.cameras[camIdx].nameKm);
+                  }}
                   onUpdateDvrCheck={partial => handleUpdateDvrCheck(dvr.id, partial)}
                   onOpenDvrCheckModal={() => handleOpenDvrStatusModal(dvr.id)}
                 />
@@ -1498,15 +1582,26 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
         </div>
       )}
 
-      {/* Edit Camera Name Modal */}
+      {/* Edit Camera Name / Location Modal */}
       {editingCameraIndex !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-              <h3 className="font-bold text-base text-white">
-                កែប្រែឈ្មោះកាមេរ៉ា CAM {editingCameraIndex + 1}
-              </h3>
-              <button onClick={() => setEditingCameraIndex(null)} className="text-slate-400 hover:text-white">
+              <div>
+                <h3 className="font-bold text-base text-white">
+                  កែប្រែចំណុចទីតាំងកាមេរ៉ា CAM {editingCameraIndex + 1}
+                </h3>
+                <p className="text-xs text-sky-400 font-mono mt-0.5">
+                  {dvrProfiles.find(d => d.id === (editingDvrId || activeDvrId))?.name || activeDvr.name} • จุดตั้งกล้อง (ទីតាំងកាមេរ៉ា)
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingCameraIndex(null);
+                  setEditingDvrId(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1514,42 +1609,47 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             <form onSubmit={handleSaveCameraName} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
-                  ឈ្មោះទីតាំងជាភាសាថៃ (Thai Location Name)
+                  ចំណុចទីតាំងជាភាសាថៃ / จุดตั้งกล้อง (ภาษาไทย)
                 </label>
                 <input
                   type="text"
                   value={editCamNameThai}
                   onChange={e => setEditCamNameThai(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  placeholder="ឧ. กล้องหลังอพาร์ทเม้นท์"
                   required
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
-                  ឈ្មោះទីតាំងជាភាសាខ្មែរ (Khmer Location Name)
+                  ចំណុចទីតាំងជាភាសាខ្មែរ / ទីតាំងកាមេរ៉ា (ភាសាខ្មែរ)
                 </label>
                 <input
                   type="text"
                   value={editCamNameKm}
                   onChange={e => setEditCamNameKm(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  placeholder="ឧ. កាមេរ៉ាខាងក្រោយអាផាតមិន"
                 />
               </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setEditingCameraIndex(null)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+                  onClick={() => {
+                    setEditingCameraIndex(null);
+                    setEditingDvrId(null);
+                  }}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   បោះបង់
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold"
+                  className="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-sky-600/30 cursor-pointer"
                 >
-                  រក្សាទុក
+                  រក្សាទុក (Save)
                 </button>
               </div>
             </form>
@@ -2024,9 +2124,24 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
                     <td className="border border-slate-300 py-1 px-1.5 text-center font-mono font-semibold">
                       {c.number}
                     </td>
-                    <td className="border border-slate-300 py-1 px-3">
-                      <div className="font-medium text-slate-900">{c.nameThai}</div>
-                      <div className="text-[10px] text-slate-600 font-normal">{c.nameKm}</div>
+                    <td
+                      className={`border border-slate-300 py-1 px-3 ${
+                        onEditCamera ? 'cursor-pointer hover:bg-sky-50 transition group' : ''
+                      }`}
+                      onClick={() => onEditCamera && onEditCamera(idx)}
+                      title={onEditCamera ? 'ចុចដើម្បីកែប្រែទីតាំងកាមេរ៉ា / Click to edit camera location' : undefined}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <div>
+                          <div className="font-medium text-slate-900 group-hover:text-sky-950">{c.nameThai}</div>
+                          <div className="text-[10px] text-slate-600 font-normal group-hover:text-sky-800">{c.nameKm}</div>
+                        </div>
+                        {onEditCamera && (
+                          <span className="no-print opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-sky-600 transition shrink-0">
+                            <Edit2 className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Day Shift: Normal */}

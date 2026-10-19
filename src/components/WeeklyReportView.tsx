@@ -68,11 +68,22 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     return saved && saved.length > 0 ? saved : initialDVRProfiles;
   });
 
-  // Hydrate full screenshots from IndexedDB on startup
+  // Hydrate full screenshots from IndexedDB on startup without touching camera configs
   useEffect(() => {
     hydrateDVRProfilesWithIDB(dvrProfiles).then(hydrated => {
       if (hydrated && hydrated.length > 0) {
-        setDvrProfiles(hydrated);
+        setDvrProfiles(current => {
+          return current.map(curr => {
+            const h = hydrated.find(x => x.id === curr.id);
+            if (!h) return curr;
+            return {
+              ...curr,
+              dayScreenshotUrl: curr.dayScreenshotUrl || h.dayScreenshotUrl,
+              nightScreenshotUrl: curr.nightScreenshotUrl || h.nightScreenshotUrl,
+              cameras: curr.cameras, // explicitly keep camera configurations intact
+            };
+          });
+        });
       }
     });
   }, []);
