@@ -167,31 +167,69 @@ export const hydrateDVRProfilesWithIDB = async (profiles: any[]): Promise<any[]>
   }
 };
 
-export const setStoredDVRProfiles = (profiles: any[]) => {
-  // 1. Asynchronously save full screenshots to IndexedDB (virtually unlimited quota)
-  if (Array.isArray(profiles)) {
-    profiles.forEach(p => {
-      if (p.dayScreenshotUrl && p.dayScreenshotUrl.length > 50) {
-        idbSet(`dvr_${p.id}_day`, p.dayScreenshotUrl);
-      }
-      if (p.nightScreenshotUrl && p.nightScreenshotUrl.length > 50) {
-        idbSet(`dvr_${p.id}_night`, p.nightScreenshotUrl);
-      }
-    });
-  }
+// Helper to strip heavy image data URLs from any DVR profile list
+export const toLightweightProfiles = (profiles: any[]) => {
+  if (!Array.isArray(profiles)) return [];
+  return profiles.map(p => ({
+    ...p,
+    dayScreenshotUrl: p.dayScreenshotUrl && p.dayScreenshotUrl.length > 300 ? '' : p.dayScreenshotUrl,
+    nightScreenshotUrl: p.nightScreenshotUrl && p.nightScreenshotUrl.length > 300 ? '' : p.nightScreenshotUrl,
+    lastScreenshotUrl: p.lastScreenshotUrl && p.lastScreenshotUrl.length > 300 ? '' : p.lastScreenshotUrl,
+  }));
+};
 
-  // 2. Try saving to localStorage
+// Automatic cleanup on module load to purge any bloated legacy base64 data that caused QuotaExceededError
+export const cleanupLegacyStorageBloat = () => {
   try {
-    localStorage.setItem(DVR_STORAGE_KEY, JSON.stringify(profiles));
+    const raw = localStorage.getItem(DVR_STORAGE_KEY);
+    if (raw && raw.length > 30000) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // Save to IndexedDB first so photos aren't lost
+        parsed.forEach(p => {
+          if (p.dayScreenshotUrl && p.dayScreenshotUrl.length > 50) {
+            idbSet(`dvr_${p.id}_day`, p.dayScreenshotUrl);
+          }
+          if (p.nightScreenshotUrl && p.nightScreenshotUrl.length > 50) {
+            idbSet(`dvr_${p.id}_night`, p.nightScreenshotUrl);
+          }
+        });
+        const light = toLightweightProfiles(parsed);
+        localStorage.setItem(DVR_STORAGE_KEY, JSON.stringify(light));
+      }
+    }
+  } catch (err) {
+    console.warn('Storage cleanup notice:', err);
+  }
+};
+
+// Immediately execute cleanup to free up quota
+if (typeof window !== 'undefined') {
+  cleanupLegacyStorageBloat();
+}
+
+export const setStoredDVRProfiles = (profiles: any[]) => {
+  if (!Array.isArray(profiles)) return;
+
+  // 1. Asynchronously save full screenshots to IndexedDB (virtually unlimited quota)
+  profiles.forEach(p => {
+    if (p.dayScreenshotUrl && p.dayScreenshotUrl.length > 50) {
+      idbSet(`dvr_${p.id}_day`, p.dayScreenshotUrl);
+    }
+    if (p.nightScreenshotUrl && p.nightScreenshotUrl.length > 50) {
+      idbSet(`dvr_${p.id}_night`, p.nightScreenshotUrl);
+    }
+  });
+
+  // 2. Always save lightweight metadata to localStorage (never store MBs of base64 data URLs)
+  try {
+    const lightweight = toLightweightProfiles(profiles);
+    localStorage.setItem(DVR_STORAGE_KEY, JSON.stringify(lightweight));
   } catch (e) {
-    console.warn('localStorage quota exceeded. Saving lightweight metadata without raw images.', e);
+    console.warn('localStorage quota warning in setStoredDVRProfiles. Pruning...', e);
     try {
-      // Strip large screenshot data URLs from localStorage, keeping all metadata intact
-      const lightweight = profiles.map(p => ({
-        ...p,
-        dayScreenshotUrl: p.dayScreenshotUrl && p.dayScreenshotUrl.length > 300 ? '' : p.dayScreenshotUrl,
-        nightScreenshotUrl: p.nightScreenshotUrl && p.nightScreenshotUrl.length > 300 ? '' : p.nightScreenshotUrl,
-      }));
+      cleanupLegacyStorageBloat();
+      const lightweight = toLightweightProfiles(profiles);
       localStorage.setItem(DVR_STORAGE_KEY, JSON.stringify(lightweight));
     } catch (innerErr) {
       console.error('Critical storage save error in localStorage', innerErr);
@@ -215,28 +253,28 @@ export const getStoredWeeklyAttachments = (weekId: string): WeeklyDVRAttachment[
 };
 
 export const setStoredWeeklyAttachments = (weekId: string, attachments: WeeklyDVRAttachment[]) => {
-  // Save screenshots to IndexedDB
-  if (Array.isArray(attachments)) {
-    attachments.forEach(att => {
-      if (att.dayScreenshotUrl) idbSet(`weekly_${weekId}_${att.dvrId}_day`, att.dayScreenshotUrl);
-      if (att.nightScreenshotUrl) idbSet(`weekly_${weekId}_${att.dvrId}_night`, att.nightScreenshotUrl);
-    });
-  }
+  if (!Array.isArray(attachments)) return;
 
-  try {
-    localStorage.setItem(`${WEEKLY_ATTACHMENTS_KEY_PREFIX}${weekId}`, JSON.stringify(attachments));
-  } catch (e) {
-    console.warn('localStorage quota exceeded for weekly attachments. Saving lightweight version.', e);
-    try {
-      const lightweight = attachments.map(att => ({
-        ...att,
-        dayScreenshotUrl: att.dayScreenshotUrl && att.dayScreenshotUrl.length > 300 ? '' : att.dayScreenshotUrl,
-        nightScreenshotUrl: att.nightScreenshotUrl && att.nightScreenshotUrl.length > 300 ? '' : att.nightScreenshotUrl,
-      }));
-      localStorage.setItem(`${WEEKLY_ATTACHMENTS_KEY_PREFIX}${weekId}`, JSON.stringify(lightweight));
-    } catch (innerErr) {
-      console.error('Critical storage save error in weekly attachments', innerErr);
+  // 1. Save full screenshots to IndexedDB
+  attachments.forEach(att => {
+    if (att.dayScreenshotUrl && att.dayScreenshotUrl.length > 50) {
+      idbSet(`weekly_${weekId}_${att.dvrId}_day`, att.dayScreenshotUrl);
     }
+    if (att.nightScreenshotUrl && att.nightScreenshotUrl.length > 50) {
+      idbSet(`weekly_${weekId}_${att.dvrId}_night`, att.nightScreenshotUrl);
+    }
+  });
+
+  // 2. Save lightweight version directly to localStorage
+  try {
+    const lightweight = attachments.map(att => ({
+      ...att,
+      dayScreenshotUrl: att.dayScreenshotUrl && att.dayScreenshotUrl.length > 300 ? '' : att.dayScreenshotUrl,
+      nightScreenshotUrl: att.nightScreenshotUrl && att.nightScreenshotUrl.length > 300 ? '' : att.nightScreenshotUrl,
+    }));
+    localStorage.setItem(`${WEEKLY_ATTACHMENTS_KEY_PREFIX}${weekId}`, JSON.stringify(lightweight));
+  } catch (e) {
+    console.warn('localStorage setItem notice for weekly attachments:', e);
   }
 };
 
