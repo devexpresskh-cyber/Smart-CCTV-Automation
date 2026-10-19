@@ -1,0 +1,8 @@
+{
+  "name": "CCTV Sentinel - ប្រព័ន្ធគ្រប់គ្រងការត្រួតពិនិត្យកាមេរ៉ាសុវត្ថិភាព",
+  "description": "ប្រព័ន្ធកត់ត្រាការត្រួតពិនិត្យ CCTV ពេលថ្ងៃនិងយប់ គ្រប់គ្រងទីតាំងទាំង ១៣ បង្កើតរបាយការណ៍ប្រចាំសប្តាហ៍ និងតាមដានបញ្ហាបច្ចេកទេស",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CCTV Sentinel - ប្រព័ន្ធគ្រប់គ្រងការត្រួតពិនិត្យកាមេរ៉ាសុវត្ថិភាព</title>
+    <meta name="description" content="ប្រព័ន្ធកត់ត្រាការត្រួតពិនិត្យ CCTV ពេលថ្ងៃនិងយប់ គ្រប់គ្រងទីតាំងទាំង ១៣ បង្កើតរបាយការណ៍ប្រចាំសប្តាហ៍ និងតាមដានបញ្ហាបច្ចេកទេស" />
+    <meta property="og:title" content="CCTV Sentinel - ប្រព័ន្ធគ្រប់គ្រងការត្រួតពិនិត្យកាមេរ៉ាសុវត្ថិភាព" />
+    <meta property="og:description" content="ប្រព័ន្ធកត់ត្រាការត្រួតពិនិត្យ CCTV ពេលថ្ងៃនិងយប់ គ្រប់គ្រងទីតាំងទាំង ១៣ បង្កើតរបាយការណ៍ប្រចាំសប្តាហ៍ និងតាមដានបញ្ហាបច្ចេកទេស" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Fix for Chrome extensions attempting to overwrite window.fetch
+      (function() {
+        try {
+          var _origFetch = window.fetch;
+          var _currentFetch = function() {
+            return _origFetch.apply(this, arguments);
+          };
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return _currentFetch;
+            },
+            set: function(newFetch) {
+              _currentFetch = newFetch;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {}
+
+        // Prevent external browser extension errors from breaking application UI
+        window.addEventListener('error', function(event) {
+          if (
+            (event.filename && (event.filename.indexOf('chrome-extension://') !== -1 || event.filename.indexOf('moz-extension://') !== -1)) ||
+            (event.message && event.message.indexOf('Cannot set property fetch') !== -1)
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Battambang:wght@100;300;400;700;900&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
