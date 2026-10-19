@@ -1,29 +1,83 @@
 @import "tailwindcss";
 
+/* 1. Definitive @font-face for 'Khmer OS Battambang' */
 @font-face {
   font-family: 'Khmer OS Battambang';
-  src: local('Khmer OS Battambang'), local('KhmerOSBattambang');
-  font-weight: 400;
   font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Khmer OS Battambang'),
+       local('KhmerOSBattambang'),
+       local('Battambang'),
+       url('/fonts/KhmerOSbattambang.ttf') format('truetype'),
+       url('https://fonts.gstatic.com/s/battambang/v26/uk-mEGe7raEw-HjkzZabDnU.ttf') format('truetype');
 }
 
 @font-face {
   font-family: 'Khmer OS Battambang';
-  src: local('Khmer OS Battambang Bold'), local('KhmerOSBattambang-Bold');
-  font-weight: 700;
   font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Khmer OS Battambang Bold'),
+       local('KhmerOSBattambang-Bold'),
+       local('Battambang Bold'),
+       local('Battambang-Bold'),
+       url('/fonts/Battambang-Bold.ttf') format('truetype'),
+       url('https://fonts.gstatic.com/s/battambang/v26/uk-lEGe7raEw-HjkzZabNsmMxyQ.ttf') format('truetype');
+}
+
+/* 2. Direct mapping for 'Battambang' to ensure identical typography across browsers */
+@font-face {
+  font-family: 'Battambang';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Khmer OS Battambang'),
+       local('KhmerOSBattambang'),
+       local('Battambang'),
+       url('/fonts/KhmerOSbattambang.ttf') format('truetype'),
+       url('https://fonts.gstatic.com/s/battambang/v26/uk-mEGe7raEw-HjkzZabDnU.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Battambang';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Khmer OS Battambang Bold'),
+       local('KhmerOSBattambang-Bold'),
+       local('Battambang Bold'),
+       local('Battambang-Bold'),
+       url('/fonts/Battambang-Bold.ttf') format('truetype'),
+       url('https://fonts.gstatic.com/s/battambang/v26/uk-lEGe7raEw-HjkzZabNsmMxyQ.ttf') format('truetype');
+}
+
+@theme {
+  --font-sans: 'Khmer OS Battambang', 'Battambang', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-battambang: 'Khmer OS Battambang', 'Battambang', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 @layer base {
-  body {
-    font-family: 'Khmer OS Battambang', 'Battambang', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  html, body {
+    font-family: 'Khmer OS Battambang', 'Battambang', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     color: #1e293b;
     background-color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  input, textarea, button, select {
+    font-family: inherit;
   }
 }
 
 /* Print specific styles for PDF and Official Weekly Reports */
 @media print {
+  html, body, * {
+    font-family: 'Khmer OS Battambang', 'Battambang', sans-serif !important;
+  }
+
   body {
     background-color: #ffffff !important;
     color: #000000 !important;
