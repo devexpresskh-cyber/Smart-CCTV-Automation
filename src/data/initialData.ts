@@ -240,7 +240,7 @@ export const initialCameras: Camera[] = [
     status: 'faulty',
     installDate: '2025-02-01',
     notes: 'កញ្ចក់ស្រអាប់ខ្លាំងដោយសារធូលីដី និងមានដំណក់ទឹកភ្លៀងជ្រាបចូល',
-    lastCheckedAt: '2026-10-18T18:30:00Z',
+    lastCheckedAt: '2026-10-15T09:00:00Z',
   },
 
   // LOC-03: Admin Lobby (3 cams)
@@ -392,7 +392,7 @@ export const initialCameras: Camera[] = [
     status: 'faulty',
     installDate: '2025-03-05',
     notes: 'ដាច់ភ្លើង PoE ញឹកញាប់ រូបភាពរលត់បើកៗ (PoE Switch Port flapping)',
-    lastCheckedAt: '2026-10-18T18:30:00Z',
+    lastCheckedAt: '2026-10-14T14:20:00Z',
   },
   {
     id: 'cam-19',
@@ -542,7 +542,7 @@ export const initialCameras: Camera[] = [
     status: 'offline',
     installDate: '2025-02-20',
     notes: 'ដាច់សញ្ញាទាំងស្រុង (No Ping / Fiber Converter rx failure)',
-    lastCheckedAt: '2026-10-18T18:30:00Z',
+    lastCheckedAt: '2026-10-13T11:00:00Z',
   },
 
   // LOC-10: Perimeter West (3 cams)

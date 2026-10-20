@@ -19,6 +19,7 @@ import {
   FileSpreadsheet,
   Sparkles,
 } from 'lucide-react';
+import { isCameraOverdue, getCameraOverdueHours } from '../utils/healthAlerts';
 
 interface DashboardViewProps {
   locations: LocationZone[];
@@ -66,6 +67,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Open tickets
   const openTickets = tickets.filter(tkt => tkt.status !== 'closed' && tkt.status !== 'resolved');
   const criticalTickets = openTickets.filter(tkt => tkt.severity === 'critical');
+
+  // Camera Health Alerts (>72h overdue)
+  const overdueCameras = cameras.filter(c => isCameraOverdue(c));
 
   return (
     <div className="space-y-8 pb-12">
@@ -123,6 +127,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Camera Health Alert Banner (>72h Overdue) */}
+      {overdueCameras.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-950/40 via-slate-900 to-amber-950/30 border-l-4 border-amber-500 p-4 rounded-xl text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500/20 rounded-lg text-amber-400 shrink-0">
+              <Clock className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                <span>{lang === 'km' ? 'ការជូនដំណឹងសុខភាពកាមេរ៉ា (Camera Health Alert)' : 'Camera Health Alert (>72h Overdue)'}</span>
+                <span className="text-xs bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full font-mono font-extrabold">
+                  {overdueCameras.length} {lang === 'km' ? 'គ្រឿងហួសកំណត់' : 'Overdue'}
+                </span>
+              </h4>
+              <p className="text-xs text-amber-300 mt-0.5">
+                {lang === 'km'
+                  ? `រកឃើញកាមេរ៉ាចំនួន ${overdueCameras.length} គ្រឿងខកខានការត្រួតពិនិត្យលើសពី ៧២ ម៉ោង (៣ ថ្ងៃ)។ សូមចុះត្រួតពិនិត្យជាបន្ទាន់ដើម្បីរក្សាអនុលោមភាពសុវត្ថិភាព។`
+                  : `${overdueCameras.length} camera(s) have not received an inspection in over 72 hours. Please perform an audit to maintain safety compliance.`}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigateToInspection()}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg shrink-0 transition shadow-md"
+          >
+            <span>{lang === 'km' ? 'ចុះត្រួតពិនិត្យឥឡូវនេះ' : 'Inspect Overdue'}</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Critical Security Alert Banner if any */}
       {criticalTickets.length > 0 && (

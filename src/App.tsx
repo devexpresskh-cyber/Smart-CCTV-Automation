@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Camera,
   InspectionRecord,
@@ -20,7 +20,10 @@ import {
   getStoredTickets,
   setStoredTickets,
   resetAllToDefault,
+  getStoredDVRProfiles,
 } from './utils/storage';
+import { initialDVRProfiles } from './data/smartReportTemplate';
+import { getOverdueCameraAlerts, getDVRHealthAlerts } from './utils/healthAlerts';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { InspectionView } from './components/InspectionView';
@@ -30,6 +33,7 @@ import { ProblemTrackingView } from './components/ProblemTrackingView';
 import { SmartScannerView } from './components/SmartScannerView';
 import { CameraPreviewModal } from './components/CameraPreviewModal';
 import { PrintReportModal } from './components/PrintReportModal';
+import { HealthAlertModal } from './components/HealthAlertModal';
 import { translations } from './i18n/translations';
 
 export default function App() {
@@ -42,6 +46,10 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [presetShift, setPresetShift] = useState<ShiftType | undefined>(undefined);
   const [targetLocationId, setTargetLocationId] = useState<string | undefined>(undefined);
+  const [targetDvrId, setTargetDvrId] = useState<string | undefined>(undefined);
+
+  // Health alerts modal
+  const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
 
   // Modals
   const [previewCamera, setPreviewCamera] = useState<Camera | null>(null);
@@ -222,9 +230,48 @@ export default function App() {
     ? locations.find(l => l.id === previewCamera.locationId)
     : undefined;
 
+  // 🚨 Automated Health Alert Monitoring (72h inspection threshold & DVR fleet health)
+  const cameraAlerts = useMemo(() => getOverdueCameraAlerts(cameras), [cameras]);
+
+  const dvrAlerts = useMemo(() => {
+    const profiles = getStoredDVRProfiles();
+    const list = profiles && profiles.length > 0 ? profiles : initialDVRProfiles;
+    return list.flatMap(p => getDVRHealthAlerts(p));
+  }, []);
+
+  const handleMarkCameraInspected = (cameraId: string) => {
+    const now = new Date().toISOString();
+    const updated = cameras.map(c => (c.id === cameraId ? { ...c, lastCheckedAt: now } : c));
+    setCameras(updated);
+    setStoredCameras(updated);
+    showToast(
+      lang === 'km'
+        ? '✓ បានសម្គាល់កាមេរ៉ាត្រួតពិនិត្យរួចរាល់ (បាន Reset រយៈពេល ៧២ ម៉ោង)'
+        : '✓ Camera marked as inspected (72h timer reset)'
+    );
+  };
+
+  const handleMarkAllCamerasInspected = () => {
+    const now = new Date().toISOString();
+    const updated = cameras.map(c => ({ ...c, lastCheckedAt: now }));
+    setCameras(updated);
+    setStoredCameras(updated);
+    showToast(
+      lang === 'km'
+        ? '✓ បានសម្គាល់កាមេរ៉ាទាំងអស់ត្រួតពិនិត្យរួចរាល់!'
+        : '✓ All cameras marked as inspected successfully!'
+    );
+  };
+
+  const handleNavigateToDvr = (dvrId: string) => {
+    setTargetDvrId(dvrId);
+    setCurrentTab('smart-scanner');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row font-sans selection:bg-sky-500 selection:text-white">
-      {/* Sidebar Navigation */}
+      {/* Sidebar Navigation with Live Health Alerts */}
       <Sidebar
         currentTab={currentTab}
         onTabChange={tab => {
@@ -237,6 +284,9 @@ export default function App() {
         onLanguageChange={handleLanguageChange}
         onResetData={handleResetData}
         openTicketsCount={openTicketsCount}
+        cameraOverdueCount={cameraAlerts.length}
+        dvrHealthAlertsCount={dvrAlerts.length}
+        onOpenHealthModal={() => setIsHealthModalOpen(true)}
       />
 
       {/* Main Content Column */}
@@ -300,6 +350,8 @@ export default function App() {
                 setCurrentTab('weekly-report');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
+              targetDvrId={targetDvrId}
+              onOpenHealthModal={() => setIsHealthModalOpen(true)}
             />
           )}
 
@@ -367,6 +419,23 @@ export default function App() {
         data={printReportData}
         lang={lang}
         onClose={() => setPrintReportData(null)}
+      />
+
+      {/* Automated Camera & DVR Fleet Health Alert Diagnostics Modal */}
+      <HealthAlertModal
+        isOpen={isHealthModalOpen}
+        onClose={() => setIsHealthModalOpen(false)}
+        lang={lang}
+        cameraAlerts={cameraAlerts}
+        dvrAlerts={dvrAlerts}
+        locations={locations}
+        onMarkCameraInspected={handleMarkCameraInspected}
+        onMarkAllCamerasInspected={handleMarkAllCamerasInspected}
+        onNavigateToInspection={() => {
+          setCurrentTab('inspection');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onNavigateToDvr={handleNavigateToDvr}
       />
     </div>
   );

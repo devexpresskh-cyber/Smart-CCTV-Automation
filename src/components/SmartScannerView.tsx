@@ -47,18 +47,32 @@ import {
   BookOpen,
   Sliders,
   ExternalLink,
+  Clipboard,
+  HardDrive,
+  Activity,
+  AlertOctagon,
+  HeartPulse,
 } from 'lucide-react';
+import {
+  getDVRHealthAlerts,
+  calculateFleetHealth,
+  DVRHealthAlert,
+} from '../utils/healthAlerts';
 
 interface SmartScannerViewProps {
   lang: Language;
   onSyncWithSystem?: (report: SmartInspectionReport) => void;
   onNavigateToWeeklyReport?: () => void;
+  targetDvrId?: string;
+  onOpenHealthModal?: () => void;
 }
 
 export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   lang,
   onSyncWithSystem,
   onNavigateToWeeklyReport,
+  targetDvrId,
+  onOpenHealthModal,
 }) => {
   const t = translations[lang];
 
@@ -95,6 +109,24 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   // Drag and drop states
   const [isDraggingDay, setIsDraggingDay] = useState(false);
   const [isDraggingNight, setIsDraggingNight] = useState(false);
+
+  // Active shift for Paste (Ctrl+V) target: defaults to 'day'
+  const [activePasteShift, setActivePasteShift] = useState<'day' | 'night'>('day');
+
+  // DVR fleet filter: 'all' or 'alerts'
+  const [dvrFilter, setDvrFilter] = useState<'all' | 'alerts'>('all');
+
+  // Sync active DVR if targetDvrId is passed from modal/nav
+  useEffect(() => {
+    if (targetDvrId) {
+      setActiveDvrId(targetDvrId);
+    }
+  }, [targetDvrId]);
+
+  // Compute fleet health and alerts
+  const fleetHealth = calculateFleetHealth(dvrProfiles);
+  const allDvrAlerts = dvrProfiles.flatMap(p => getDVRHealthAlerts(p));
+  const currentDvrAlerts = getDVRHealthAlerts(activeDvr);
 
   // Modals
   const [isAddDvrModalOpen, setIsAddDvrModalOpen] = useState(false);
@@ -548,30 +580,83 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     img.src = compressed;
   };
 
-  // Clipboard Paste Support (Ctrl+V) anywhere on the page
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
+  // Helper: Extract image from clipboard and assign directly to requested shift
+  const handlePasteForShift = (clipboardData: DataTransfer | null, targetShift: 'day' | 'night'): boolean => {
+    const items = clipboardData?.items;
+    if (!items || items.length === 0) return false;
 
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          const file = items[i].getAsFile();
-          if (file) {
-            if (!dayScreenshot) {
-              handleDayImageSelect(file);
-            } else {
-              handleNightImageSelect(file);
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          if (targetShift === 'day') {
+            handleDayImageSelect(file);
+            showFeedback('📋 បាន Paste រូបភាពចូលក្នុង "Screenshot ពេលថ្ងៃ (Day Shift)" ដោយជោគជ័យ!');
+          } else {
+            handleNightImageSelect(file);
+            showFeedback('📋 បាន Paste រូបភាពចូលក្នុង "Screenshot ពេលយប់ (Night Shift)" ដោយជោគជ័យ!');
+          }
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Direct paste button action (reads browser clipboard or sets active target)
+  const handleDirectPasteClick = async (shift: 'day' | 'night') => {
+    setActivePasteShift(shift);
+    let pasted = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          for (const type of item.types) {
+            if (type.startsWith('image/')) {
+              const blob = await item.getType(type);
+              const file = new File([blob], `clipboard_${shift}_screenshot.png`, { type });
+              if (shift === 'day') {
+                handleDayImageSelect(file);
+                showFeedback('📋 បាន Paste រូបភាពពី Clipboard ចូលក្នុង Day Shift ដោយជោគជ័យ!');
+              } else {
+                handleNightImageSelect(file);
+                showFeedback('📋 បាន Paste រូបភាពពី Clipboard ចូលក្នុង Night Shift ដោយជោគជ័យ!');
+              }
+              pasted = true;
+              return;
             }
           }
-          break;
         }
+      }
+    } catch (err) {
+      // Permission prompt or non-secure context fallback
+    }
+
+    if (!pasted) {
+      showFeedback(
+        `🎯 បានកំណត់ "${shift === 'day' ? 'Day Shift (ពេលថ្ងៃ)' : 'Night Shift (ពេលយប់)'}" ជាគោលដៅ Ctrl+V! សូមចុច Ctrl+V ដើម្បី Paste រូបភាព។`
+      );
+    }
+  };
+
+  // Global Clipboard Paste Support (Ctrl+V) directed to activePasteShift
+  useEffect(() => {
+    const handleGlobalPaste = (e: ClipboardEvent) => {
+      // Ignore if user is typing inside text input/textarea
+      const target = document.activeElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      const handled = handlePasteForShift(e.clipboardData, activePasteShift);
+      if (handled) {
+        e.preventDefault();
       }
     };
 
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [dayScreenshot, channelCount, gridCols, gridRows, activeDvrId]);
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => window.removeEventListener('paste', handleGlobalPaste);
+  }, [activePasteShift, channelCount, gridCols, gridRows, activeDvrId]);
 
   // One-click: Auto-generate Sample Screenshots & Audit for ALL DVRs!
   const handlePreloadAllDVRs = () => {
@@ -984,6 +1069,134 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
           </div>
         </div>
 
+        {/* 🛡️ DVR Fleet Health Monitor & Real-time Alerts */}
+        <div className="pt-3 border-t border-slate-800 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1 rounded-lg bg-sky-500/20 text-sky-400">
+                <HeartPulse className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                  <span>ប្រព័ន្ធត្រួតពិនិត្យសុខភាពម៉ាស៊ីន DVR (Fleet Health Monitor)</span>
+                  <span className={`px-2 py-0.2 rounded-full text-[10px] font-mono font-extrabold ${
+                    fleetHealth.fleetHealthRate >= 90
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                  }`}>
+                    {fleetHealth.fleetHealthRate}% Operational
+                  </span>
+                </h4>
+                <p className="text-[10px] text-slate-400">
+                  ត្រួតពិនិត្យស្វ័យប្រវត្តិនូវ Hard Disk, កាលបរិច្ឆេទ, រយៈពេលថត (Retention ≥ 30 ថ្ងៃ), និងសញ្ញារូបភាពកាមេរ៉ាគ្រប់ DVR
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setDvrFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg transition ${
+                    dvrFilter === 'all'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  គ្រប់ DVR ({dvrProfiles.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDvrFilter('alerts')}
+                  className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 ${
+                    dvrFilter === 'alerts'
+                      ? 'bg-rose-600 text-white shadow-xs'
+                      : allDvrAlerts.length > 0
+                      ? 'text-rose-400 hover:text-rose-200'
+                      : 'text-slate-500'
+                  }`}
+                >
+                  <span>មានបញ្ហា ({allDvrAlerts.length})</span>
+                  {allDvrAlerts.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />}
+                </button>
+              </div>
+
+              {onOpenHealthModal && (
+                <button
+                  type="button"
+                  onClick={onOpenHealthModal}
+                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
+                  title="Open full health diagnostics modal"
+                >
+                  <Activity className="w-3.5 h-3.5 text-amber-400" />
+                  <span>របាយការណ៍លម្អិត</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Fleet Health Metric Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-2.5 space-y-1">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">ម៉ាស៊ីន DVR សរុប</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-base font-bold font-mono text-white">{fleetHealth.totalDvr} DVRs</span>
+                <span className="text-[10px] text-emerald-400 font-semibold">{fleetHealth.healthyDvr} ល្អ</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-2.5 space-y-1">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">សញ្ញារូបភាពកាមេរ៉ា</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-base font-bold font-mono text-emerald-400">{fleetHealth.workingChannels} / {fleetHealth.totalChannels}</span>
+                {fleetHealth.faultyChannels > 0 && (
+                  <span className="text-[10px] text-rose-400 font-semibold font-mono animate-pulse">{fleetHealth.faultyChannels} អេក្រង់ខ្មៅ</span>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-2.5 space-y-1">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">សុខភាព HARD DISK</span>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-base font-bold font-mono ${fleetHealth.diskErrors > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {fleetHealth.diskErrors > 0 ? `${fleetHealth.diskErrors} Error` : '100% OK'}
+                </span>
+                <span className="text-[10px] text-slate-400">HDD Sector</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-2.5 space-y-1">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">រយៈពេលថត (Retention)</span>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-base font-bold font-mono ${fleetHealth.lowRetentionCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  {fleetHealth.lowRetentionCount > 0 ? `${fleetHealth.lowRetentionCount} < 30D` : '≥ 30 ថ្ងៃ'}
+                </span>
+                <span className="text-[10px] text-slate-400">ស្តង់ដារ ៣០ ថ្ងៃ</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Active Alert Banner if any alerts */}
+          {allDvrAlerts.length > 0 && (
+            <div className="bg-gradient-to-r from-rose-950/60 via-amber-950/40 to-slate-900 border border-rose-500/40 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-rose-300 font-medium">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 animate-bounce" />
+                <span>
+                  រកឃើញបញ្ហា DVR ចំនួន <strong>{allDvrAlerts.length}</strong> (អេក្រង់ខ្មៅ {fleetHealth.faultyChannels} channels, {fleetHealth.diskErrors} disk error, {fleetHealth.lowRetentionCount} low retention)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDvrFilter(dvrFilter === 'alerts' ? 'all' : 'alerts')}
+                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-bold shrink-0 transition"
+              >
+                {dvrFilter === 'alerts' ? 'បង្ហាញគ្រប់ DVR ឡើងវិញ' : 'ត្រងមើលតែ DVR មានបញ្ហា'}
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Multi-DVR Carousel & Management */}
         <div className="pt-3 border-t border-slate-800">
           <div className="flex items-center justify-between mb-2">
@@ -1009,39 +1222,53 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
           {/* DVR Buttons Scroll */}
           <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
-            {dvrProfiles.map((dvr, idx) => {
-              const isSelected = dvr.id === activeDvrId;
-              const hasDay = Boolean(dvr.dayScreenshotUrl);
-              const hasNight = Boolean(dvr.nightScreenshotUrl);
+            {dvrProfiles
+              .filter(d => dvrFilter === 'all' || getDVRHealthAlerts(d).length > 0)
+              .map((dvr, idx) => {
+                const isSelected = dvr.id === activeDvrId;
+                const hasDay = Boolean(dvr.dayScreenshotUrl);
+                const hasNight = Boolean(dvr.nightScreenshotUrl);
+                const dvrAlerts = getDVRHealthAlerts(dvr);
+                const hasAlert = dvrAlerts.length > 0;
 
-              return (
-                <button
-                  key={dvr.id}
-                  onClick={() => {
-                    setActiveDvrId(dvr.id);
-                    setViewMode('single');
-                  }}
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold shrink-0 transition flex flex-col gap-1 border text-left ${
-                    isSelected
-                      ? 'bg-sky-600 text-white border-sky-400 shadow-lg shadow-sky-600/30'
-                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[10px] opacity-75">#{idx + 1}</span>
-                    <span className="font-bold">{dvr.name}</span>
-                  </div>
+                return (
+                  <button
+                    key={dvr.id}
+                    onClick={() => {
+                      setActiveDvrId(dvr.id);
+                      setViewMode('single');
+                    }}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold shrink-0 transition flex flex-col gap-1 border text-left relative ${
+                      isSelected
+                        ? 'bg-sky-600 text-white border-sky-400 shadow-lg shadow-sky-600/30'
+                        : hasAlert
+                        ? 'bg-rose-950/40 text-rose-200 border-rose-800/80 hover:border-rose-600'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] opacity-75">#{idx + 1}</span>
+                      <span className="font-bold truncate max-w-[150px]">{dvr.name}</span>
+                      {hasAlert && (
+                        <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse ml-auto" title={`${dvrAlerts.length} issues`} />
+                      )}
+                    </div>
 
-                  <div className="flex items-center gap-2 text-[10px]">
-                    <span className="font-mono opacity-80">{dvr.channelCount} CH</span>
-                    <span className="flex items-center gap-1">
-                      <span className={`w-1.5 h-1.5 rounded-full ${hasDay ? 'bg-amber-400' : 'bg-slate-600'}`} title="Day Screenshot" />
-                      <span className={`w-1.5 h-1.5 rounded-full ${hasNight ? 'bg-indigo-400' : 'bg-slate-600'}`} title="Night Screenshot" />
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <span className="font-mono opacity-80">{dvr.channelCount} CH</span>
+                      <span className="flex items-center gap-1">
+                        <span className={`w-1.5 h-1.5 rounded-full ${hasDay ? 'bg-amber-400' : 'bg-slate-600'}`} title="Day Screenshot" />
+                        <span className={`w-1.5 h-1.5 rounded-full ${hasNight ? 'bg-indigo-400' : 'bg-slate-600'}`} title="Night Screenshot" />
+                      </span>
+                      {hasAlert && (
+                        <span className="text-rose-400 text-[9px] font-mono ml-auto">
+                          ⚠ {dvrAlerts.length}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
           </div>
         </div>
       </div>
@@ -1099,12 +1326,74 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             </div>
           </div>
 
+          {/* 🎯 Quick Paste Target Switcher & Shortcuts Guide */}
+          <div className="no-print bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400 font-bold">
+                <Clipboard className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="font-bold text-white">គោលដៅ Paste Screenshot (Ctrl+V Target):</span>
+                <p className="text-[10px] text-slate-400">
+                  ចុចលើប្រអប់ Day ឬ Night ឬចុចប៊ូតុងខាងក្រោម ដើម្បីកំណត់គោលដៅទទួលរូបភាពពេលចុច <kbd className="px-1 py-0.2 bg-slate-800 border border-slate-700 rounded text-slate-200 font-mono">Ctrl+V</kbd>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActivePasteShift('day');
+                  showFeedback('🎯 គោលដៅ Paste ត្រូវបានកំណត់ជា: ☀️ Screenshot ពេលថ្ងៃ (Day Shift)');
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-bold transition text-xs border ${
+                  activePasteShift === 'day'
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-950/30'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+                }`}
+              >
+                <Sun className="w-3.5 h-3.5" />
+                <span>☀️ ពេលថ្ងៃ (Day Shift)</span>
+                {activePasteShift === 'day' && <span className="font-mono text-[10px] bg-slate-950 text-amber-300 px-1 rounded">Active ✓</span>}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActivePasteShift('night');
+                  showFeedback('🎯 គោលដៅ Paste ត្រូវបានកំណត់ជា: 🌙 Screenshot ពេលយប់ (Night Shift)');
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-bold transition text-xs border ${
+                  activePasteShift === 'night'
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-950/30'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5" />
+                <span>🌙 ពេលយប់ (Night Shift)</span>
+                {activePasteShift === 'night' && <span className="font-mono text-[10px] bg-white text-indigo-700 px-1 rounded">Active ✓</span>}
+              </button>
+            </div>
+          </div>
+
           {/* Dual Screenshot Drop / Upload Zones (Day & Night) */}
           <div className="no-print grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* ☀️ DAY SCREENSHOT DROPZONE */}
             <div
-              className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 space-y-3 transition ${
-                isDraggingDay ? 'border-amber-400 ring-2 ring-amber-400/30' : 'border-slate-800'
+              tabIndex={0}
+              onClick={() => setActivePasteShift('day')}
+              onFocus={() => setActivePasteShift('day')}
+              onPaste={e => {
+                e.preventDefault();
+                handlePasteForShift(e.clipboardData, 'day');
+              }}
+              className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 space-y-3 transition cursor-pointer outline-none relative ${
+                isDraggingDay
+                  ? 'border-amber-400 ring-2 ring-amber-400/50 bg-amber-950/20'
+                  : activePasteShift === 'day'
+                  ? 'border-amber-400/90 ring-2 ring-amber-400/40 bg-slate-900 shadow-lg shadow-amber-950/20'
+                  : 'border-slate-800 hover:border-slate-700'
               }`}
               onDragOver={e => {
                 e.preventDefault();
@@ -1121,26 +1410,54 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             >
               <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
+                  <div className={`p-1.5 rounded-lg ${activePasteShift === 'day' ? 'bg-amber-500 text-slate-950' : 'bg-amber-500/20 text-amber-400'}`}>
                     <Sun className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-xs sm:text-sm text-white">
-                      1. Screenshot ពេលថ្ងៃ (Day Shift)
-                    </h4>
-                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Checklist សម្រាប់ជួរ "ตอนวัน"</p>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-xs sm:text-sm text-white">
+                        1. Screenshot ពេលថ្ងៃ (Day Shift)
+                      </h4>
+                      {activePasteShift === 'day' && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-amber-500 text-slate-950 animate-pulse">
+                          🎯 Ctrl+V Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Checklist សម្រាប់ជួរ "ตอนวัน" • ចុច Ctrl+V ដើម្បី Paste ភ្លាមៗ</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* Dedicated Paste Day Button */}
                   <button
-                    onClick={() => handleDayImageSelect(generateSampleMonitor(channelCount, activeDvr.name, 'day'))}
-                    className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-lg text-[10px] font-bold"
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleDirectPasteClick('day');
+                    }}
+                    className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                    title="Paste Day Screenshot from Clipboard (Ctrl+V)"
+                  >
+                    <Clipboard className="w-3 h-3" />
+                    <span>📋 Paste Day</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleDayImageSelect(generateSampleMonitor(channelCount, activeDvr.name, 'day'));
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg text-[10px] font-bold"
                   >
                     ⚡ Sample Day
                   </button>
                   <button
-                    onClick={() => dayFileInputRef.current?.click()}
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      dayFileInputRef.current?.click();
+                    }}
                     className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold flex items-center gap-1"
                   >
                     <Upload className="w-3 h-3" />
@@ -1159,7 +1476,10 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
               {/* Day Image Preview Container */}
               <div
                 className="relative aspect-video rounded-xl bg-black border border-slate-800 overflow-hidden group flex items-center justify-center cursor-pointer"
-                onClick={() => dayFileInputRef.current?.click()}
+                onClick={() => {
+                  setActivePasteShift('day');
+                  dayFileInputRef.current?.click();
+                }}
               >
                 {dayScreenshot ? (
                   <img src={dayScreenshot} alt="Day Screenshot" className="w-full h-full object-contain" />
@@ -1167,7 +1487,14 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                   <div className="text-center p-4 text-slate-500 space-y-1">
                     <Sun className="w-8 h-8 mx-auto opacity-40 text-amber-400 mb-1" />
                     <p className="text-xs font-semibold text-slate-300">ទម្លាក់រូបថតពេលថ្ងៃនៅទីនេះ ឬចុច Upload</p>
-                    <p className="text-[10px] text-slate-500">គាំទ្រការ Paste (Ctrl+V) ដោយផ្ទាល់</p>
+                    <p className="text-[10px] text-amber-400 font-semibold">គាំទ្រការ Paste (Ctrl+V) ពេលថ្ងៃដោយផ្ទាល់</p>
+                  </div>
+                )}
+
+                {activePasteShift === 'day' && (
+                  <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 text-[10px] font-extrabold shadow-md flex items-center gap-1">
+                    <Clipboard className="w-3 h-3" />
+                    <span>🎯 គោលដៅ Ctrl+V Active</span>
                   </div>
                 )}
 
@@ -1218,8 +1545,19 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
             {/* 🌙 NIGHT SCREENSHOT DROPZONE */}
             <div
-              className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 space-y-3 transition ${
-                isDraggingNight ? 'border-indigo-400 ring-2 ring-indigo-400/30' : 'border-slate-800'
+              tabIndex={0}
+              onClick={() => setActivePasteShift('night')}
+              onFocus={() => setActivePasteShift('night')}
+              onPaste={e => {
+                e.preventDefault();
+                handlePasteForShift(e.clipboardData, 'night');
+              }}
+              className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 space-y-3 transition cursor-pointer outline-none relative ${
+                isDraggingNight
+                  ? 'border-indigo-400 ring-2 ring-indigo-400/50 bg-indigo-950/20'
+                  : activePasteShift === 'night'
+                  ? 'border-indigo-400/90 ring-2 ring-indigo-400/40 bg-slate-900 shadow-lg shadow-indigo-950/20'
+                  : 'border-slate-800 hover:border-slate-700'
               }`}
               onDragOver={e => {
                 e.preventDefault();
@@ -1236,26 +1574,54 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             >
               <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400">
+                  <div className={`p-1.5 rounded-lg ${activePasteShift === 'night' ? 'bg-indigo-600 text-white' : 'bg-indigo-500/20 text-indigo-400'}`}>
                     <Moon className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-xs sm:text-sm text-white">
-                      2. Screenshot ពេលយប់ (Night Shift)
-                    </h4>
-                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Checklist សម្រាប់ជួរ "ตอนคืน"</p>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-xs sm:text-sm text-white">
+                        2. Screenshot ពេលយប់ (Night Shift)
+                      </h4>
+                      {activePasteShift === 'night' && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-indigo-500 text-white animate-pulse">
+                          🎯 Ctrl+V Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Checklist សម្រាប់ជួរ "ตอนคืน" • ចុច Ctrl+V ដើម្បី Paste ភ្លាមៗ</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* Dedicated Paste Night Button */}
                   <button
-                    onClick={() => handleNightImageSelect(generateSampleMonitor(channelCount, activeDvr.name, 'night'))}
-                    className="px-2.5 py-1 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-[10px] font-bold"
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleDirectPasteClick('night');
+                    }}
+                    className="px-2.5 py-1 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                    title="Paste Night Screenshot from Clipboard (Ctrl+V)"
+                  >
+                    <Clipboard className="w-3 h-3" />
+                    <span>📋 Paste Night</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleNightImageSelect(generateSampleMonitor(channelCount, activeDvr.name, 'night'));
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded-lg text-[10px] font-bold"
                   >
                     ⚡ Sample Night
                   </button>
                   <button
-                    onClick={() => nightFileInputRef.current?.click()}
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      nightFileInputRef.current?.click();
+                    }}
                     className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold flex items-center gap-1"
                   >
                     <Upload className="w-3 h-3" />
@@ -1274,7 +1640,10 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
               {/* Night Image Preview Container */}
               <div
                 className="relative aspect-video rounded-xl bg-black border border-slate-800 overflow-hidden group flex items-center justify-center cursor-pointer"
-                onClick={() => nightFileInputRef.current?.click()}
+                onClick={() => {
+                  setActivePasteShift('night');
+                  nightFileInputRef.current?.click();
+                }}
               >
                 {nightScreenshot ? (
                   <img src={nightScreenshot} alt="Night Screenshot" className="w-full h-full object-contain" />
@@ -1282,7 +1651,14 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                   <div className="text-center p-4 text-slate-500 space-y-1">
                     <Moon className="w-8 h-8 mx-auto opacity-40 text-indigo-400 mb-1" />
                     <p className="text-xs font-semibold text-slate-300">ទម្លាក់រូបថតពេលយប់នៅទីនេះ ឬចុច Upload</p>
-                    <p className="text-[10px] text-slate-500">គាំទ្រការ Paste (Ctrl+V) ដោយផ្ទាល់</p>
+                    <p className="text-[10px] text-indigo-400 font-semibold">គាំទ្រការ Paste (Ctrl+V) ពេលយប់ដោយផ្ទាល់</p>
+                  </div>
+                )}
+
+                {activePasteShift === 'night' && (
+                  <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[10px] font-extrabold shadow-md flex items-center gap-1">
+                    <Clipboard className="w-3 h-3" />
+                    <span>🎯 គោលដៅ Ctrl+V Active</span>
                   </div>
                 )}
 

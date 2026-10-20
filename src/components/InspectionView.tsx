@@ -29,7 +29,13 @@ import {
   ChevronDown,
   Layers,
   Sparkles,
+  Clock,
 } from 'lucide-react';
+import {
+  isCameraOverdue,
+  getCameraOverdueHours,
+  formatOverdueTime,
+} from '../utils/healthAlerts';
 
 interface InspectionViewProps {
   locations: LocationZone[];
@@ -105,9 +111,13 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
 
   const [saving, setSaving] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
+  const [filterOverdueOnly, setFilterOverdueOnly] = useState(false);
 
-  // Filtered cameras based on location filter and search query
+  // Filtered cameras based on location filter, overdue filter, and search query
   const filteredCameras = cameras.filter(cam => {
+    if (filterOverdueOnly && !isCameraOverdue(cam)) {
+      return false;
+    }
     if (selectedLocationId !== 'all' && cam.locationId !== selectedLocationId) {
       return false;
     }
@@ -435,7 +445,7 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
             </div>
 
             {/* Filters bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
               {/* Location Zone Filter */}
               <div className="relative">
                 <select
@@ -464,6 +474,27 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-sky-500"
                 />
               </div>
+
+              {/* Overdue (>72h) Filter Toggle */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setFilterOverdueOnly(!filterOverdueOnly)}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition border ${
+                    filterOverdueOnly
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                      : 'bg-slate-950 text-slate-300 border-slate-700 hover:text-white'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{lang === 'km' ? 'កាមេរ៉ាហួស ៧២ ម៉ោង' : 'Overdue (>72h)'}</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-extrabold ${
+                    filterOverdueOnly ? 'bg-slate-950 text-amber-300' : 'bg-amber-500/20 text-amber-400'
+                  }`}>
+                    {cameras.filter(c => isCameraOverdue(c)).length}
+                  </span>
+                </button>
+              </div>
             </div>
 
             {/* Checklist items */}
@@ -472,6 +503,8 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                 const check = cameraChecks[camera.id] || { status: 'ok' };
                 const loc = locations.find(l => l.id === camera.locationId);
                 const isIssue = check.status === 'issue';
+                const isOverdue = isCameraOverdue(camera);
+                const overdueHours = getCameraOverdueHours(camera);
 
                 return (
                   <div
@@ -479,6 +512,8 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                     className={`p-4 rounded-xl border transition-all ${
                       isIssue
                         ? 'bg-rose-950/20 border-rose-800/60 shadow-xs'
+                        : isOverdue
+                        ? 'bg-amber-950/15 border-amber-500/40 hover:border-amber-500/70'
                         : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
                     }`}
                   >
@@ -503,9 +538,20 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                             <span className="text-[11px] text-slate-400">
                               • {loc ? (lang === 'km' ? loc.nameKm : loc.nameEn) : ''}
                             </span>
+                            {isOverdue && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 animate-pulse">
+                                <Clock className="w-3 h-3 text-amber-400" />
+                                <span>{lang === 'km' ? 'ហួស ៧២ ម៉ោង' : 'Overdue (>72h)'} ({formatOverdueTime(overdueHours, lang === 'km')})</span>
+                              </span>
+                            )}
                           </div>
                           <p className="text-[11px] text-slate-500 mt-0.5 font-mono">
                             IP: {camera.ipAddress} • {camera.type.toUpperCase()} • {camera.model}
+                            {camera.lastCheckedAt && (
+                              <span className="ml-2 text-slate-400">
+                                • {lang === 'km' ? 'ត្រួតពិនិត្យចុងក្រោយ:' : 'Last inspected:'} {new Date(camera.lastCheckedAt).toLocaleDateString()}
+                              </span>
+                            )}
                           </p>
                         </div>
                       </div>

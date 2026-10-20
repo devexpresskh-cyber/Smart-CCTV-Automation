@@ -18,6 +18,8 @@ import {
   ChevronRight,
   Shield,
   Camera,
+  AlertTriangle,
+  HardDrive,
 } from 'lucide-react';
 
 export type NavTab = 'dashboard' | 'inspection' | 'smart-scanner' | 'locations' | 'weekly-report' | 'problems';
@@ -29,6 +31,9 @@ interface SidebarProps {
   onLanguageChange: (lang: Language) => void;
   onResetData: () => void;
   openTicketsCount: number;
+  cameraOverdueCount?: number;
+  dvrHealthAlertsCount?: number;
+  onOpenHealthModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -38,6 +43,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onLanguageChange,
   onResetData,
   openTicketsCount,
+  cameraOverdueCount = 0,
+  dvrHealthAlertsCount = 0,
+  onOpenHealthModal,
 }) => {
   const t = translations[lang];
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -52,10 +60,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const hours = currentTime.getHours();
   const currentShift: ShiftType = hours >= 6 && hours < 18 ? 'day' : 'night';
 
+  const totalHealthAlerts = cameraOverdueCount + dvrHealthAlertsCount;
+
   const navItems = [
     { id: 'dashboard' as NavTab, label: t.navDashboard, icon: LayoutDashboard },
-    { id: 'smart-scanner' as NavTab, label: t.navSmartScanner, icon: Camera, isNew: true },
-    { id: 'inspection' as NavTab, label: t.navInspection, icon: ClipboardCheck },
+    {
+      id: 'smart-scanner' as NavTab,
+      label: t.navSmartScanner,
+      icon: Camera,
+      isNew: true,
+      badge: dvrHealthAlertsCount > 0 ? dvrHealthAlertsCount : undefined,
+      badgeClass: 'bg-rose-600 text-white',
+      badgeTitle: `${dvrHealthAlertsCount} DVR Health Issues`,
+    },
+    {
+      id: 'inspection' as NavTab,
+      label: t.navInspection,
+      icon: ClipboardCheck,
+      badge: cameraOverdueCount > 0 ? cameraOverdueCount : undefined,
+      badgeClass: 'bg-amber-500 text-slate-950 font-extrabold',
+      badgeTitle: `${cameraOverdueCount} Overdue Cameras (>72h)`,
+    },
     { id: 'locations' as NavTab, label: t.navLocations, icon: Building2 },
     { id: 'weekly-report' as NavTab, label: t.navWeeklyReport, icon: FileSpreadsheet },
     {
@@ -63,6 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: t.navProblems,
       icon: AlertOctagon,
       badge: openTicketsCount > 0 ? openTicketsCount : undefined,
+      badgeClass: 'bg-rose-500 text-white',
     },
   ];
 
@@ -160,6 +186,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
+        {/* Camera & DVR Health Alert Notification Card in Sidebar */}
+        {totalHealthAlerts > 0 && (
+          !isCollapsed ? (
+            <div
+              onClick={onOpenHealthModal}
+              className="cursor-pointer bg-gradient-to-r from-rose-950/80 to-amber-950/80 border border-rose-500/50 hover:border-rose-400 p-3 rounded-2xl shadow-lg shadow-rose-950/40 transition group relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 w-16 h-16 bg-rose-500/10 rounded-full blur-xl pointer-events-none" />
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 animate-bounce shrink-0" />
+                  <span>{lang === 'km' ? 'ការជូនដំណឹងសុខភាព' : 'Health Alerts'}</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white animate-pulse">
+                  {totalHealthAlerts}
+                </span>
+              </div>
+              <div className="text-[11px] space-y-1">
+                {cameraOverdueCount > 0 && (
+                  <div className="flex items-center justify-between text-amber-300 font-medium">
+                    <span>📷 {lang === 'km' ? 'កាមេរ៉ាហួស ៧២ ម៉ោង:' : 'Overdue (>72h):'}</span>
+                    <span className="font-bold font-mono bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-500/30">
+                      {cameraOverdueCount}
+                    </span>
+                  </div>
+                )}
+                {dvrHealthAlertsCount > 0 && (
+                  <div className="flex items-center justify-between text-rose-300 font-medium">
+                    <span>🛡️ {lang === 'km' ? 'DVR មានបញ្ហា:' : 'DVR Issues:'}</span>
+                    <span className="font-bold font-mono bg-rose-500/20 px-1.5 py-0.2 rounded border border-rose-500/30">
+                      {dvrHealthAlertsCount}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 pt-1.5 border-t border-rose-800/40 flex items-center justify-between text-[10px] text-rose-400 group-hover:text-rose-200 font-semibold">
+                <span>{lang === 'km' ? 'ចុចមើលព័ត៌មានលម្អិត' : 'View Diagnostic Report'}</span>
+                <span>→</span>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={onOpenHealthModal}
+              className="mx-auto p-2.5 rounded-xl bg-rose-950/70 border border-rose-500/60 text-rose-300 hover:bg-rose-900/90 flex items-center justify-center relative transition group"
+              title={`Health Alerts: ${totalHealthAlerts} active alerts (${cameraOverdueCount} cams > 72h, ${dvrHealthAlertsCount} DVR issues)`}
+            >
+              <AlertTriangle className="w-4 h-4 text-rose-400 group-hover:scale-110 transition" />
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[9px] font-extrabold rounded-full flex items-center justify-center animate-pulse">
+                {totalHealthAlerts}
+              </span>
+            </button>
+          )
+        )}
+
         {/* Navigation Links */}
         <nav className="space-y-1.5">
           {navItems.map(item => {
@@ -190,8 +270,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                     {item.badge !== undefined && (
                       <span
+                        title={item.badgeTitle}
                         className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
-                          isActive ? 'bg-white text-sky-700' : 'bg-rose-500 text-white'
+                          isActive
+                            ? 'bg-white text-sky-700'
+                            : item.badgeClass || 'bg-rose-500 text-white'
                         }`}
                       >
                         {item.badge}
@@ -302,6 +385,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {totalHealthAlerts > 0 && (
+            <button
+              onClick={onOpenHealthModal}
+              className="flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg bg-rose-600 text-white animate-pulse"
+              title={`${totalHealthAlerts} health alerts`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{totalHealthAlerts}</span>
+            </button>
+          )}
+
           {/* Shift indicator */}
           <div
             className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md ${
