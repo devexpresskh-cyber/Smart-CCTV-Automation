@@ -723,17 +723,21 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
         faultySymptomStr: 'អេក្រង់ខ្មៅ អត់ចេញរូបភាព (Black screen)',
         dvrCheck: activeDvr.dvrCheck || defaultDVRCheck,
         signOff: {
-          itOfficer: '',
-          maintenanceLead: '',
-          maintenanceHead: '',
-          manager: '',
-          generalManager: '',
+          itOfficer: 'មន្ត្រីត្រួតពិនិត្យ IT (IT Surveillance Officer)',
+          maintenanceLead: 'ប្រធានក្រុមបច្ចេកទេស (Maintenance Lead)',
+          maintenanceHead: 'ប្រធានផ្នែកថែទាំ (Maintenance Head)',
+          manager: 'អ្នកគ្រប់គ្រងទូទៅ (Factory Manager)',
+          generalManager: 'អគ្គនាយក (General Manager)',
         },
       };
       onSyncWithSystem(report);
     }
 
-    showFeedback(`💾 បានរក្សាទុក Screenshot & Checklist ភ្ជាប់ទៅរបាយការណ៍សប្តាហ៍ ${selectedWeek} ដោយជោគជ័យ!`);
+    showFeedback(
+      lang === 'km'
+        ? `💾 បានរក្សាទុក Weekly Checklist (${selectedWeek}), CCTV Inspection Log & Fault Tracking ដោយជោគជ័យ!`
+        : `💾 Weekly Checklist (${selectedWeek}), CCTV Inspection Log & Fault Tracking auto-saved successfully!`
+    );
   };
 
   // Toggle single camera checklist status
@@ -995,10 +999,14 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             <button
               onClick={handleSaveToWeeklyChecklist}
               className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-extrabold rounded-xl text-xs shadow-md transition"
-              title="Save screenshots and findings to weekly report"
+              title="Save checklist & sync CAMERA inspection to log & fault tracking"
             >
               <Save className="w-4 h-4" />
-              <span>💾 រក្សាទុកភ្ជាប់ទៅរបាយការណ៍សប្តាហ៍</span>
+              <span>
+                {lang === 'km'
+                  ? '💾 Sync CAMERA Inspection ពី Checklist'
+                  : '💾 Sync CAMERA Inspection from checklist'}
+              </span>
             </button>
 
             {onNavigateToWeeklyReport && (

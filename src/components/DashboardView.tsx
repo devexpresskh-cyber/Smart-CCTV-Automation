@@ -28,7 +28,7 @@ interface DashboardViewProps {
   tickets: IssueTicket[];
   lang: Language;
   onNavigateToInspection: (shift?: 'day' | 'night') => void;
-  onNavigateToLocations: (locId?: string) => void;
+  onNavigateToLocations?: (locId?: string) => void;
   onNavigateToProblems: () => void;
   onNavigateToWeeklyReport: () => void;
   onNavigateToSmartScanner?: () => void;
@@ -335,10 +335,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </p>
           </div>
           <button
-            onClick={() => onNavigateToLocations()}
+            onClick={() => onNavigateToInspection()}
             className="flex items-center gap-1 text-xs font-semibold text-sky-400 hover:text-sky-300"
           >
-            <span>{lang === 'km' ? 'មើលទីតាំងទាំងអស់' : 'View All Zones'}</span>
+            <span>{lang === 'km' ? 'ចាប់ផ្តើមត្រួតពិនិត្យ' : 'Start Inspection'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
@@ -352,7 +352,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             return (
               <div
                 key={loc.id}
-                onClick={() => onNavigateToLocations(loc.id)}
+                onClick={() => onNavigateToInspection()}
                 className="group cursor-pointer bg-slate-900/90 border border-slate-800 hover:border-sky-500/50 rounded-2xl p-4 transition-all duration-200 hover:shadow-xl hover:shadow-sky-950/40 relative overflow-hidden flex flex-col justify-between"
               >
                 <div>

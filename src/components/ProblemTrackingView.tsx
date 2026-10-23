@@ -28,6 +28,7 @@ import {
   X,
   Building2,
   Calendar,
+  Trash2,
 } from 'lucide-react';
 
 interface ProblemTrackingViewProps {
@@ -50,6 +51,9 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
   onPreviewCamera,
 }) => {
   const t = translations[lang];
+
+  // Multi-select row state for delete
+  const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -94,6 +98,56 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
     }
     return true;
   });
+
+  // Multi-select helpers
+  const isAllFilteredSelected =
+    filteredTickets.length > 0 &&
+    filteredTickets.every(tkt => selectedTicketIds.includes(tkt.id));
+  const isSomeFilteredSelected =
+    filteredTickets.some(tkt => selectedTicketIds.includes(tkt.id)) && !isAllFilteredSelected;
+
+  const handleToggleSelectAll = () => {
+    if (isAllFilteredSelected) {
+      setSelectedTicketIds(prev => prev.filter(id => !filteredTickets.some(t => t.id === id)));
+    } else {
+      const merged = new Set([...selectedTicketIds, ...filteredTickets.map(t => t.id)]);
+      setSelectedTicketIds(Array.from(merged));
+    }
+  };
+
+  const handleToggleSelectRow = (ticketId: string) => {
+    setSelectedTicketIds(prev =>
+      prev.includes(ticketId) ? prev.filter(id => id !== ticketId) : [...prev, ticketId]
+    );
+  };
+
+  const handleDeleteSelectedTickets = () => {
+    if (selectedTicketIds.length === 0) return;
+    const count = selectedTicketIds.length;
+    const confirmMsg =
+      lang === 'km'
+        ? `តើអ្នកពិតជាចង់លុបសំបុត្របញ្ហាចំនួន ${count} ដែលបានជ្រើសរើសនេះមែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។`
+        : `Are you sure you want to delete ${count} selected issue ticket(s)? This action cannot be undone.`;
+
+    if (window.confirm(confirmMsg)) {
+      const remaining = tickets.filter(t => !selectedTicketIds.includes(t.id));
+      onUpdateTickets(remaining);
+      setSelectedTicketIds([]);
+    }
+  };
+
+  const handleDeleteSingleTicket = (ticketId: string, ticketNumber: string) => {
+    const confirmMsg =
+      lang === 'km'
+        ? `តើអ្នកពិតជាចង់លុបសំបុត្រ ${ticketNumber} នេះមែនទេ?`
+        : `Are you sure you want to delete ticket ${ticketNumber}?`;
+
+    if (window.confirm(confirmMsg)) {
+      const remaining = tickets.filter(t => t.id !== ticketId);
+      onUpdateTickets(remaining);
+      setSelectedTicketIds(prev => prev.filter(id => id !== ticketId));
+    }
+  };
 
   const handleOpenTicketModal = (ticket?: IssueTicket) => {
     if (ticket) {
@@ -238,6 +292,21 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5">
+          {selectedTicketIds.length > 0 && (
+            <button
+              onClick={handleDeleteSelectedTickets}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-rose-600/30 animate-pulse"
+              title={lang === 'km' ? 'លុបសំបុត្រដែលបានជ្រើស' : 'Delete Selected Tickets'}
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>
+                {lang === 'km'
+                  ? `លុប (${selectedTicketIds.length})`
+                  : `Delete (${selectedTicketIds.length})`}
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => exportTicketsToExcel(tickets, cameras, locations, lang)}
             className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
@@ -248,7 +317,7 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
 
           <button
             onClick={() => handleOpenTicketModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-rose-600/20"
+            className="flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-sky-600/20"
           >
             <Plus className="w-4 h-4" />
             <span>{t.createIssueTicket}</span>
@@ -317,12 +386,61 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
         </div>
       </div>
 
+      {/* Bulk Delete & Selection Action Bar */}
+      {selectedTicketIds.length > 0 && (
+        <div className="bg-rose-950/80 border border-rose-500/60 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xl shadow-rose-950/50">
+          <div className="flex items-center gap-3">
+            <span className="flex h-3 w-3 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+            </span>
+            <span className="text-xs font-bold text-rose-200 font-mono">
+              {lang === 'km'
+                ? `បានជ្រើសរើសសំបុត្រចំនួន ${selectedTicketIds.length} / ${filteredTickets.length}`
+                : `Selected ${selectedTicketIds.length} of ${filteredTickets.length} ticket(s)`}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedTicketIds([])}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-medium transition"
+            >
+              {lang === 'km' ? 'សម្អាតការជ្រើសរើស' : 'Clear Selection'}
+            </button>
+            <button
+              onClick={handleDeleteSelectedTickets}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-rose-700/40"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>
+                {lang === 'km'
+                  ? `លុបដែលបានជ្រើស (${selectedTicketIds.length})`
+                  : `Delete Selected (${selectedTicketIds.length})`}
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tickets Table / List */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950 text-slate-400 uppercase font-mono">
               <tr>
+                <th className="py-3 px-3 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    checked={isAllFilteredSelected}
+                    ref={el => {
+                      if (el) el.indeterminate = isSomeFilteredSelected;
+                    }}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-sky-500 cursor-pointer accent-sky-500"
+                    title={isAllFilteredSelected ? 'Deselect all' : 'Select all visible'}
+                  />
+                </th>
                 <th className="py-3 px-4">{t.ticketNumber}</th>
                 <th className="py-3 px-4">{t.cameraCode}</th>
                 <th className="py-3 px-4">{t.location}</th>
@@ -336,7 +454,7 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
             <tbody className="divide-y divide-slate-800/60">
               {filteredTickets.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-slate-500">
+                  <td colSpan={9} className="text-center py-12 text-slate-500">
                     <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400 mb-2 opacity-60" />
                     <p>{t.noDataFound}</p>
                   </td>
@@ -348,9 +466,26 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
                   const statusLabel = t[`status_${tkt.status}` as keyof typeof t] || tkt.status;
                   const severityLabel = t[`severity_${tkt.severity}` as keyof typeof t] || tkt.severity;
                   const issueLabel = t[`issue_${tkt.issueType}` as keyof typeof t] || tkt.issueType;
+                  const isRowSelected = selectedTicketIds.includes(tkt.id);
 
                   return (
-                    <tr key={tkt.id} className="hover:bg-slate-850/50 transition">
+                    <tr
+                      key={tkt.id}
+                      className={`transition ${
+                        isRowSelected
+                          ? 'bg-rose-950/20 hover:bg-rose-950/30 border-l-2 border-l-rose-500'
+                          : 'hover:bg-slate-850/50'
+                      }`}
+                    >
+                      <td className="py-3.5 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isRowSelected}
+                          onChange={() => handleToggleSelectRow(tkt.id)}
+                          className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-rose-500 cursor-pointer accent-rose-500"
+                        />
+                      </td>
+
                       <td className="py-3.5 px-4 font-mono font-bold text-sky-400 whitespace-nowrap">
                         {tkt.ticketNumber}
                         <div className="text-[10px] text-slate-500 font-normal">
@@ -427,6 +562,13 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
                             title={t.updateStatus}
                           >
                             <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSingleTicket(tkt.id, tkt.ticketNumber)}
+                            className="p-1.5 bg-slate-800 hover:bg-rose-600/80 text-slate-400 hover:text-white rounded-lg transition"
+                            title={lang === 'km' ? `លុបសំបុត្រ ${tkt.ticketNumber}` : `Delete ticket ${tkt.ticketNumber}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>

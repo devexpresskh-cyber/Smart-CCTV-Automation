@@ -22,7 +22,7 @@ import {
   HardDrive,
 } from 'lucide-react';
 
-export type NavTab = 'dashboard' | 'inspection' | 'smart-scanner' | 'locations' | 'weekly-report' | 'problems';
+export type NavTab = 'dashboard' | 'inspection' | 'smart-scanner' | 'weekly-report' | 'problems';
 
 interface SidebarProps {
   currentTab: NavTab;
@@ -81,7 +81,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badgeClass: 'bg-amber-500 text-slate-950 font-extrabold',
       badgeTitle: `${cameraOverdueCount} Overdue Cameras (>72h)`,
     },
-    { id: 'locations' as NavTab, label: t.navLocations, icon: Building2 },
     { id: 'weekly-report' as NavTab, label: t.navWeeklyReport, icon: FileSpreadsheet },
     {
       id: 'problems' as NavTab,

@@ -31,6 +31,7 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  RotateCw,
 } from 'lucide-react';
 
 interface WeeklyReportViewProps {
@@ -41,6 +42,7 @@ interface WeeklyReportViewProps {
   lang: Language;
   onOpenPrintModal: (reportData: any) => void;
   onNavigateToSmartScanner?: () => void;
+  onSyncFromChecklist?: (shift?: 'day' | 'night') => void;
 }
 
 export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
@@ -51,6 +53,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
   lang,
   onOpenPrintModal,
   onNavigateToSmartScanner,
+  onSyncFromChecklist,
 }) => {
   const t = translations[lang];
 
@@ -370,6 +373,17 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
               {t.previousWeek}
             </button>
           </div>
+
+          {onSyncFromChecklist && (
+            <button
+              onClick={() => onSyncFromChecklist()}
+              className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-sky-600/25"
+              title="Sync all cameras, inspection logs, and issues directly from weekly checklist"
+            >
+              <RotateCw className="w-4 h-4 text-white" />
+              <span>{lang === 'km' ? '🔄 Sync CAMERA Inspection ពី Checklist' : '🔄 Sync CAMERA Inspection from checklist'}</span>
+            </button>
+          )}
 
           <button
             onClick={handleExportExcel}

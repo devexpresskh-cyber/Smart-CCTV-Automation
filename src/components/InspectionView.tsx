@@ -30,12 +30,16 @@ import {
   Layers,
   Sparkles,
   Clock,
+  RotateCw,
+  RefreshCw,
 } from 'lucide-react';
 import {
   isCameraOverdue,
   getCameraOverdueHours,
   formatOverdueTime,
 } from '../utils/healthAlerts';
+import { getStoredDVRProfiles } from '../utils/storage';
+import { initialDVRProfiles } from '../data/smartReportTemplate';
 
 interface InspectionViewProps {
   locations: LocationZone[];
@@ -46,6 +50,7 @@ interface InspectionViewProps {
   presetShift?: ShiftType;
   onSaveInspection: (record: InspectionRecord, newTickets: IssueTicket[]) => void;
   onPreviewCamera: (camera: Camera) => void;
+  onSyncFromChecklist?: (shift?: ShiftType) => void;
 }
 
 export const InspectionView: React.FC<InspectionViewProps> = ({
@@ -56,6 +61,7 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
   presetShift,
   onSaveInspection,
   onPreviewCamera,
+  onSyncFromChecklist,
 }) => {
   const t = translations[lang];
 
@@ -112,6 +118,59 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
   const [saving, setSaving] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
   const [filterOverdueOnly, setFilterOverdueOnly] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Sync camera inspection statuses directly from the latest Weekly Checklist / DVR profiles
+  const handleSyncFromChecklist = () => {
+    setIsSyncing(true);
+    const profiles = getStoredDVRProfiles();
+    const dvrList = profiles && profiles.length > 0 ? profiles : initialDVRProfiles;
+    const allChecklistCams = dvrList.flatMap(d => d.cameras || []);
+
+    let normalCount = 0;
+    let issueCount = 0;
+
+    setCameraChecks(prev => {
+      const next = { ...prev };
+      cameras.forEach((cam, idx) => {
+        const camNum = parseInt(cam.code.replace(/[^0-9]/g, ''), 10) || (idx + 1);
+        const matched =
+          allChecklistCams.find(c => c.number === camNum) ||
+          allChecklistCams[idx % allChecklistCams.length];
+
+        const hasIssue = matched
+          ? shift === 'day'
+            ? matched.dayStatus === 'issue'
+            : matched.nightStatus === 'issue'
+          : cam.status === 'faulty' || cam.status === 'offline';
+
+        if (hasIssue) {
+          issueCount++;
+          next[cam.id] = {
+            status: 'issue',
+            issueType: 'no_signal',
+            issueSeverity: 'critical',
+            notes: matched?.symptom || 'នៅអេក្រង់មិនបង្ហាញរូបភាព (Black screen)',
+          };
+        } else {
+          normalCount++;
+          next[cam.id] = {
+            status: 'ok',
+          };
+        }
+      });
+      return next;
+    });
+
+    setIsSyncing(false);
+    setSyncFeedback(
+      lang === 'km'
+        ? `✓ បាន Sync ការត្រួតពិនិត្យកាមេរ៉ាពី Checklist (${shift === 'day' ? 'វេនថ្ងៃ' : 'វេនយប់'}): ${normalCount} ធម្មតា (OK), ${issueCount} មានបញ្ហា!`
+        : `✓ Synced CAMERA Inspection from checklist (${shift.toUpperCase()} Shift): ${normalCount} OK, ${issueCount} issues detected!`
+    );
+    setTimeout(() => setSyncFeedback(null), 5000);
+  };
 
   // Filtered cameras based on location filter, overdue filter, and search query
   const filteredCameras = cameras.filter(cam => {
@@ -420,7 +479,7 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
 
           {/* Camera Checklist Controls */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Layers className="w-5 h-5 text-sky-400" />
@@ -433,16 +492,41 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                 </p>
               </div>
 
-              {/* Mark All OK Quick Button */}
-              <button
-                type="button"
-                onClick={handleMarkAllVisibleOk}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold transition hover:scale-[1.01]"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                <span>{t.markAllOk}</span>
-              </button>
+              {/* Action Buttons: Sync from Checklist + Mark All OK */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleSyncFromChecklist}
+                  disabled={isSyncing}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-sky-600/30 hover:scale-[1.01]"
+                  title="Sync camera status with latest weekly checklist results"
+                >
+                  <RotateCw className={`w-4 h-4 text-white ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>
+                    {lang === 'km'
+                      ? `🔄 Sync CAMERA Inspection ពី Checklist (${shift === 'day' ? 'វេនថ្ងៃ' : 'វេនយប់'})`
+                      : `🔄 Sync CAMERA Inspection from checklist (${shift.toUpperCase()})`}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleMarkAllVisibleOk}
+                  className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold transition hover:scale-[1.01]"
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span>{t.markAllOk}</span>
+                </button>
+              </div>
             </div>
+
+            {/* Sync Feedback Toast inside card */}
+            {syncFeedback && (
+              <div className="bg-sky-950/80 border border-sky-500/50 p-3 rounded-xl text-sky-200 flex items-center gap-2.5 shadow-lg shadow-sky-950/40">
+                <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="text-xs font-semibold">{syncFeedback}</span>
+              </div>
+            )}
 
             {/* Filters bar */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
