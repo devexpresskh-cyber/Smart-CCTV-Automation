@@ -169,6 +169,7 @@ export interface DVRProfile {
   lastCheckedDate?: string;
   workingCount?: number;
   faultyCount?: number;
+  faultySymptomStr?: string;
   dvrCheck?: DVRCheckStatus;
 }
 

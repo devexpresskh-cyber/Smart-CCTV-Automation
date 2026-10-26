@@ -378,10 +378,10 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
             <button
               onClick={() => onSyncFromChecklist()}
               className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-sky-600/25"
-              title="Sync all cameras, inspection logs, and issues directly from weekly checklist"
+              title="Sync all cameras, inspection logs, and fault tracking tickets directly from weekly checklist"
             >
               <RotateCw className="w-4 h-4 text-white" />
-              <span>{lang === 'km' ? '🔄 Sync CAMERA Inspection ពី Checklist' : '🔄 Sync CAMERA Inspection from checklist'}</span>
+              <span>{lang === 'km' ? '🔄 Sync CAMERA Inspection & Fault ពី Checklist' : '🔄 Sync CAMERA Inspection & Fault from checklist'}</span>
             </button>
           )}
 

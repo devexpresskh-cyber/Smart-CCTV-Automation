@@ -1,5 +1,6 @@
 import { LocationZone, Camera, InspectionRecord, IssueTicket, Language, WeeklyDVRAttachment } from '../types';
 import { initialLocations, initialCameras, initialIssueTickets, generateInitialInspections } from '../data/initialData';
+import { initialDVRProfiles } from '../data/smartReportTemplate';
 import { idbSet, idbGet } from './idbStorage';
 
 const STORAGE_KEYS = {
@@ -26,6 +27,51 @@ export const setStoredLanguage = (lang: Language) => {
   } catch (e) {
     console.error(e);
   }
+};
+
+export const syncLocationsFromDVRProfiles = (dvrProfiles: any[]): LocationZone[] => {
+  const source = Array.isArray(dvrProfiles) && dvrProfiles.length > 0 ? dvrProfiles : initialDVRProfiles;
+  return source.map((dvr, idx) => ({
+    id: dvr.id,
+    code: `DVR-${String(idx + 1).padStart(2, '0')}`,
+    nameKm: dvr.locationKm || dvr.name,
+    nameEn: dvr.name,
+    floorOrArea: dvr.name,
+    descriptionKm: `តំបន់កាមេរ៉ាសុវត្ថិភាព ${dvr.locationKm || dvr.name} (${dvr.channelCount || 16} Channels)`,
+    descriptionEn: `Surveillance Zone - ${dvr.name} (${dvr.channelCount || 16} Channels)`,
+    icon: 'Video',
+    targetCamerasCount: dvr.channelCount || 16,
+  }));
+};
+
+export const syncCamerasFromDVRProfiles = (dvrProfiles: any[]): Camera[] => {
+  const source = Array.isArray(dvrProfiles) && dvrProfiles.length > 0 ? dvrProfiles : initialDVRProfiles;
+  const cameras: Camera[] = [];
+
+  source.forEach((dvr, dvrIdx) => {
+    const cams = dvr.cameras || [];
+    cams.forEach((c: any) => {
+      const camId = `cam-${dvr.id}-${c.number}`;
+      const camCode = `CAM-${String(c.number).padStart(2, '0')}`;
+      const hasIssue = c.dayStatus === 'issue' || c.nightStatus === 'issue';
+      cameras.push({
+        id: camId,
+        code: `${camCode}`,
+        nameKm: c.nameKm || `កាមេរ៉ា ${c.number}`,
+        nameEn: c.nameThai || c.nameEn || `${dvr.name} Cam ${c.number}`,
+        locationId: dvr.id,
+        ipAddress: dvr.ipAddress ? `${dvr.ipAddress}` : `192.168.${dvrIdx + 1}.${100 + c.number}`,
+        model: 'Uniview / Dahua IPC',
+        type: 'dome',
+        status: hasIssue ? 'faulty' : 'working',
+        installDate: '2024-03-22',
+        lastCheckedAt: dvr.lastCheckedDate || new Date().toISOString(),
+        notes: c.symptom || (hasIssue ? (dvr.faultySymptomStr || 'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)') : undefined),
+      });
+    });
+  });
+
+  return cameras.length > 0 ? cameras : initialCameras;
 };
 
 export const getStoredLocations = (): LocationZone[] => {
@@ -55,13 +101,19 @@ export const getStoredCameras = (): Camera[] => {
     const data = localStorage.getItem(STORAGE_KEYS.CAMERAS);
     if (data) {
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // If legacy dummy cameras (loc-01), migrate to real checklist cameras
+        const isLegacy = parsed.some((c: any) => c.locationId && c.locationId.startsWith('loc-'));
+        if (!isLegacy) return parsed;
+      }
     }
   } catch (e) {
     console.error(e);
   }
-  setStoredCameras(initialCameras);
-  return initialCameras;
+  const profiles = getStoredDVRProfiles();
+  const synced = syncCamerasFromDVRProfiles(profiles);
+  setStoredCameras(synced);
+  return synced;
 };
 
 export const setStoredCameras = (cameras: Camera[]) => {

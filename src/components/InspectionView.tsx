@@ -32,6 +32,8 @@ import {
   Clock,
   RotateCw,
   RefreshCw,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import {
   isCameraOverdue,
@@ -51,6 +53,7 @@ interface InspectionViewProps {
   onSaveInspection: (record: InspectionRecord, newTickets: IssueTicket[]) => void;
   onPreviewCamera: (camera: Camera) => void;
   onSyncFromChecklist?: (shift?: ShiftType) => void;
+  onUpdateInspections?: (inspections: InspectionRecord[]) => void;
 }
 
 export const InspectionView: React.FC<InspectionViewProps> = ({
@@ -62,6 +65,7 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
   onSaveInspection,
   onPreviewCamera,
   onSyncFromChecklist,
+  onUpdateInspections,
 }) => {
   const t = translations[lang];
 
@@ -76,6 +80,7 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
   const [weatherCondition, setWeatherCondition] = useState(lang === 'km' ? 'មេឃស្រឡះ ពន្លឺធម្មតា' : 'Clear conditions');
   const [overallNotes, setOverallNotes] = useState('');
   const [selectedLocationId, setSelectedLocationId] = useState<string>('all');
+  const [selectedCameraCode, setSelectedCameraCode] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Per-camera status state
@@ -120,6 +125,85 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
   const [filterOverdueOnly, setFilterOverdueOnly] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Multi-select and clear state for Inspection History
+  const [selectedInspectionIds, setSelectedInspectionIds] = useState<string[]>([]);
+
+  const handleToggleSelectInspection = (id: string) => {
+    setSelectedInspectionIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllInspections = () => {
+    if (selectedInspectionIds.length === inspections.length) {
+      setSelectedInspectionIds([]);
+    } else {
+      setSelectedInspectionIds(inspections.map(i => i.id));
+    }
+  };
+
+  const handleDeleteSelectedInspections = () => {
+    if (selectedInspectionIds.length === 0 || !onUpdateInspections) return;
+    const count = selectedInspectionIds.length;
+    const confirmMsg =
+      lang === 'km'
+        ? `តើអ្នកពិតជាចង់លុបកំណត់ត្រាត្រួតពិនិត្យចំនួន ${count} ដែលបានជ្រើសរើសនេះមែនទេ?`
+        : `Are you sure you want to delete ${count} selected inspection log record(s)?`;
+
+    if (window.confirm(confirmMsg)) {
+      const remaining = inspections.filter(i => !selectedInspectionIds.includes(i.id));
+      onUpdateInspections(remaining);
+      setSelectedInspectionIds([]);
+    }
+  };
+
+  const handleDeleteSingleInspection = (id: string) => {
+    if (!onUpdateInspections) return;
+    const rec = inspections.find(i => i.id === id);
+    const confirmMsg =
+      lang === 'km'
+        ? `តើអ្នកពិតជាចង់លុបកំណត់ត្រាត្រួតពិនិត្យកាលបរិច្ឆេទ ${rec?.date || ''} (${rec?.shift === 'day' ? 'វេនថ្ងៃ' : 'វេនយប់'}) នេះមែនទេ?`
+        : `Are you sure you want to delete inspection log for ${rec?.date || ''} (${rec?.shift || ''})?`;
+
+    if (window.confirm(confirmMsg)) {
+      const remaining = inspections.filter(i => i.id !== id);
+      onUpdateInspections(remaining);
+      setSelectedInspectionIds(prev => prev.filter(x => x !== id));
+    }
+  };
+
+  const handleClearAllInspections = () => {
+    if (inspections.length === 0 || !onUpdateInspections) return;
+    const count = inspections.length;
+    const confirmMsg =
+      lang === 'km'
+        ? `⚠️ តើអ្នកពិតជាចង់សម្អាតកំណត់ត្រាត្រួតពិនិត្យ CCTV ទាំងអស់ (${count} កំណត់ត្រា) មែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។`
+        : `⚠️ Are you sure you want to clear all ${count} CCTV inspection log records? This action cannot be undone.`;
+
+    if (window.confirm(confirmMsg)) {
+      onUpdateInspections([]);
+      setSelectedInspectionIds([]);
+    }
+  };
+
+  // Clear / Reset form checklist
+  const handleClearChecklistForm = () => {
+    const confirmMsg =
+      lang === 'km'
+        ? 'តើអ្នកចង់កំណត់ទម្រង់ត្រួតពិនិត្យនេះឡើងវិញ (Reset Checklist) មែនទេ?'
+        : 'Reset the checklist form to default values?';
+
+    if (window.confirm(confirmMsg)) {
+      const initial: Record<string, any> = {};
+      cameras.forEach(c => {
+        initial[c.id] = { status: 'ok' };
+      });
+      setCameraChecks(initial);
+      setOverallNotes('');
+      setWeatherCondition(lang === 'km' ? 'មេឃស្រឡះ ពន្លឺធម្មតា' : 'Clear conditions');
+    }
+  };
 
   // Sync camera inspection statuses directly from the latest Weekly Checklist / DVR profiles
   const handleSyncFromChecklist = () => {
@@ -179,6 +263,10 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
     }
     if (selectedLocationId !== 'all' && cam.locationId !== selectedLocationId) {
       return false;
+    }
+    if (selectedCameraCode !== 'all') {
+      const matchCam = cam.id === selectedCameraCode || cam.code === selectedCameraCode;
+      if (!matchCam) return false;
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -504,8 +592,8 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                   <RotateCw className={`w-4 h-4 text-white ${isSyncing ? 'animate-spin' : ''}`} />
                   <span>
                     {lang === 'km'
-                      ? `🔄 Sync CAMERA Inspection ពី Checklist (${shift === 'day' ? 'វេនថ្ងៃ' : 'វេនយប់'})`
-                      : `🔄 Sync CAMERA Inspection from checklist (${shift.toUpperCase()})`}
+                      ? `🔄 Sync CAMERA & Faults ពី Checklist (${shift === 'day' ? 'វេនថ្ងៃ' : 'វេនយប់'})`
+                      : `🔄 Sync CAMERA & Faults from checklist (${shift.toUpperCase()})`}
                   </span>
                 </button>
 
@@ -516,6 +604,16 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                 >
                   <Sparkles className="w-4 h-4 text-emerald-400" />
                   <span>{t.markAllOk}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearChecklistForm}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition"
+                  title={lang === 'km' ? 'សម្អាតទម្រង់ត្រួតពិនិត្យ / Reset' : 'Clear / Reset Checklist Form'}
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                  <span>{lang === 'km' ? 'សម្អាតទម្រង់' : 'Clear Form'}</span>
                 </button>
               </div>
             </div>
@@ -529,7 +627,7 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
             )}
 
             {/* Filters bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
               {/* Location Zone Filter */}
               <div className="relative">
                 <select
@@ -543,6 +641,48 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                       {loc.code}: {lang === 'km' ? loc.nameKm : loc.nameEn}
                     </option>
                   ))}
+                </select>
+                <ChevronDown className="w-4 h-4 absolute right-3 top-3 text-slate-400 pointer-events-none" />
+              </div>
+
+              {/* Camera Code Filter (Synced from Checklist Cameras) */}
+              <div className="relative">
+                <select
+                  value={selectedCameraCode}
+                  onChange={e => setSelectedCameraCode(e.target.value)}
+                  className="w-full appearance-none bg-slate-950 border border-slate-700 rounded-xl pl-3.5 pr-8 py-2.5 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
+                >
+                  <option value="all">
+                    {lang === 'km' ? 'គ្រប់កូដកាមេរ៉ា (All Camera Codes)' : 'All Camera Codes'}
+                  </option>
+                  {locations.map(loc => {
+                    const locCams = cameras.filter(c => c.locationId === loc.id);
+                    if (locCams.length === 0) return null;
+                    return (
+                      <optgroup
+                        key={loc.id}
+                        label={`[${loc.code}] ${loc.nameEn} (${loc.nameKm})`}
+                        className="bg-slate-900 text-sky-400 font-semibold"
+                      >
+                        {locCams.map(cam => (
+                          <option key={cam.id} value={cam.id} className="bg-slate-950 text-white font-normal">
+                            {cam.code} - {cam.nameEn} ({cam.nameKm})
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                  {cameras.filter(c => !locations.some(l => l.id === c.locationId)).length > 0 && (
+                    <optgroup label="Other Cameras" className="bg-slate-900 text-slate-400 font-semibold">
+                      {cameras
+                        .filter(c => !locations.some(l => l.id === c.locationId))
+                        .map(cam => (
+                          <option key={cam.id} value={cam.id} className="bg-slate-950 text-white font-normal">
+                            {cam.code} - {cam.nameEn}
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
                 </select>
                 <ChevronDown className="w-4 h-4 absolute right-3 top-3 text-slate-400 pointer-events-none" />
               </div>
@@ -773,73 +913,146 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
                   : 'Historical shift audit records and inspector sign-offs'}
               </p>
             </div>
-            <button
-              onClick={() => exportInspectionsToExcel(inspections, cameras, locations, lang)}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span>{t.exportExcel}</span>
-            </button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedInspectionIds.length > 0 && (
+                <button
+                  onClick={handleDeleteSelectedInspections}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-sm animate-pulse"
+                  title={lang === 'km' ? 'លុបកំណត់ត្រាដែលបានជ្រើស' : 'Delete Selected Logs'}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>
+                    {lang === 'km'
+                      ? `លុប (${selectedInspectionIds.length})`
+                      : `Delete (${selectedInspectionIds.length})`}
+                  </span>
+                </button>
+              )}
+
+              {inspections.length > 0 && (
+                <button
+                  onClick={handleClearAllInspections}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 hover:text-white rounded-xl text-xs font-bold transition shadow-xs"
+                  title={lang === 'km' ? 'សម្អាតកំណត់ត្រាត្រួតពិនិត្យទាំងអស់' : 'Clear All CCTV Inspection Logs'}
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{lang === 'km' ? 'សម្អាតទាំងអស់' : 'Clear All'}</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => exportInspectionsToExcel(inspections, cameras, locations, lang)}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>{t.exportExcel}</span>
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-950 text-slate-400 uppercase font-mono">
                 <tr>
-                  <th className="py-3 px-4 rounded-l-xl">{t.selectDate}</th>
+                  <th className="py-3 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedInspectionIds.length === inspections.length && inspections.length > 0}
+                      onChange={handleToggleSelectAllInspections}
+                      className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-sky-500 cursor-pointer accent-sky-500"
+                      title={selectedInspectionIds.length === inspections.length ? 'Deselect all' : 'Select all'}
+                    />
+                  </th>
+                  <th className="py-3 px-4">{t.selectDate}</th>
                   <th className="py-3 px-4">{t.selectShift}</th>
                   <th className="py-3 px-4">{t.inspectorName}</th>
                   <th className="py-3 px-4">{t.weatherCondition}</th>
                   <th className="py-3 px-4 text-center">{t.status}</th>
-                  <th className="py-3 px-4 rounded-r-xl">{t.notes}</th>
+                  <th className="py-3 px-4">{t.notes}</th>
+                  <th className="py-3 px-4 text-right">{lang === 'km' ? 'សកម្មភាព' : 'Action'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {inspections.map(rec => {
-                  const isDay = rec.shift === 'day';
-                  return (
-                    <tr key={rec.id} className="hover:bg-slate-850/50 transition">
-                      <td className="py-3.5 px-4 font-mono font-bold text-white whitespace-nowrap">
-                        {rec.date}
-                      </td>
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
-                            isDay
-                              ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
-                              : 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/30'
-                          }`}
-                        >
-                          {isDay ? <Sun className="w-3 h-3 text-amber-400" /> : <Moon className="w-3 h-3 text-indigo-400" />}
-                          <span>{isDay ? t.shiftDayOnly : t.shiftNightOnly}</span>
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="font-semibold text-slate-200">{rec.inspectorName}</div>
-                        <div className="text-[11px] text-slate-400">{rec.inspectorRole}</div>
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-300">
-                        {rec.weatherCondition || 'N/A'}
-                      </td>
-                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        {rec.issueCount === 0 ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full font-bold">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>100% OK</span>
+                {inspections.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12 text-slate-500">
+                      <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400 mb-2 opacity-60" />
+                      <p>{lang === 'km' ? 'មិនមានកំណត់ត្រាត្រួតពិនិត្យ CCTV ទេ' : 'No CCTV inspection records found'}</p>
+                    </td>
+                  </tr>
+                ) : (
+                  inspections.map(rec => {
+                    const isDay = rec.shift === 'day';
+                    const isRowSelected = selectedInspectionIds.includes(rec.id);
+                    return (
+                      <tr
+                        key={rec.id}
+                        className={`transition ${
+                          isRowSelected
+                            ? 'bg-rose-950/20 hover:bg-rose-950/30 border-l-2 border-l-rose-500'
+                            : 'hover:bg-slate-850/50'
+                        }`}
+                      >
+                        <td className="py-3.5 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isRowSelected}
+                            onChange={() => handleToggleSelectInspection(rec.id)}
+                            className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-rose-500 cursor-pointer accent-rose-500"
+                          />
+                        </td>
+                        <td className="py-3.5 px-4 font-mono font-bold text-white whitespace-nowrap">
+                          {rec.date}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
+                              isDay
+                                ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
+                                : 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/30'
+                            }`}
+                          >
+                            {isDay ? <Sun className="w-3 h-3 text-amber-400" /> : <Moon className="w-3 h-3 text-indigo-400" />}
+                            <span>{isDay ? t.shiftDayOnly : t.shiftNightOnly}</span>
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full font-bold">
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            <span>{rec.issueCount} {lang === 'km' ? 'បញ្ហា' : 'issues'}</span>
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-400 max-w-xs truncate">
-                        {rec.overallNotes || '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="font-semibold text-slate-200">{rec.inspectorName}</div>
+                          <div className="text-[11px] text-slate-400">{rec.inspectorRole}</div>
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300">
+                          {rec.weatherCondition || 'N/A'}
+                        </td>
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          {rec.issueCount === 0 ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full font-bold">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>100% OK</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full font-bold">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>{rec.issueCount} {lang === 'km' ? 'បញ្ហា' : 'issues'}</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-400 max-w-xs truncate">
+                          {rec.overallNotes || '—'}
+                        </td>
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => handleDeleteSingleInspection(rec.id)}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition cursor-pointer"
+                            title={lang === 'km' ? 'លុបកំណត់ត្រានេះ' : 'Delete log entry'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

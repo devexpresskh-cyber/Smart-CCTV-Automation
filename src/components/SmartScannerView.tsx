@@ -720,7 +720,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             .filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue')
             .map(c => `CAM ${c.number}`)
             .join(', ') || 'គ្មាន',
-        faultySymptomStr: 'អេក្រង់ខ្មៅ អត់ចេញរូបភាព (Black screen)',
+        faultySymptomStr: activeDvr.faultySymptomStr || 'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)',
         dvrCheck: activeDvr.dvrCheck || defaultDVRCheck,
         signOff: {
           itOfficer: 'មន្ត្រីត្រួតពិនិត្យ IT (IT Surveillance Officer)',
@@ -964,6 +964,18 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     setEditingCameraIndex(null);
     setEditingDvrId(null);
     showFeedback('✓ បានរក្សាទុកចំណុចទីតាំងកាមេរ៉ា (ទីតាំងកាមេរ៉ា) ដោយជោគជ័យ!');
+  };
+
+  // Update faulty symptom string for DVR (อาการ: ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด)
+  const handleUpdateSymptom = (dvrId: string, symptom: string) => {
+    saveDVRProfiles(prev => {
+      return prev.map(d =>
+        d.id === dvrId
+          ? { ...d, faultySymptomStr: symptom }
+          : d
+      );
+    });
+    showFeedback(`✓ បានកែប្រែរោគសញ្ញា (Symptom): "${symptom}"`);
   };
 
   // Channel preset buttons list
@@ -1732,6 +1744,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             }}
             onUpdateDvrCheck={partial => handleUpdateDvrCheck(activeDvr.id, partial)}
             onOpenDvrCheckModal={() => handleOpenDvrStatusModal(activeDvr.id)}
+            onUpdateSymptom={symptom => handleUpdateSymptom(activeDvr.id, symptom)}
           />
         </div>
       ) : (
@@ -1776,6 +1789,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                   }}
                   onUpdateDvrCheck={partial => handleUpdateDvrCheck(dvr.id, partial)}
                   onOpenDvrCheckModal={() => handleOpenDvrStatusModal(dvr.id)}
+                  onUpdateSymptom={symptom => handleUpdateSymptom(dvr.id, symptom)}
                 />
               </div>
             );
@@ -2398,6 +2412,7 @@ interface ZoneReportSheetProps {
   onEditCamera?: (index: number) => void;
   onUpdateDvrCheck?: (partial: Partial<DVRCheckStatus>) => void;
   onOpenDvrCheckModal?: () => void;
+  onUpdateSymptom?: (symptom: string) => void;
 }
 
 const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
@@ -2412,6 +2427,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
   onEditCamera,
   onUpdateDvrCheck,
   onOpenDvrCheckModal,
+  onUpdateSymptom,
 }) => {
   const workingCount = cameras.filter(c => c.dayStatus === 'ok' && c.nightStatus === 'ok').length;
   const faultyCount = cameras.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length;
@@ -2421,6 +2437,25 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
       .map(c => `CAM ${c.number}`)
       .join(', ') || 'គ្មាន';
   const check: DVRCheckStatus = dvr.dvrCheck || defaultDVRCheck;
+
+  // Symptom editing state
+  const defaultSymptom = 'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)';
+  const currentSymptom = dvr.faultySymptomStr || defaultSymptom;
+  const [isEditingSymptom, setIsEditingSymptom] = useState(false);
+  const [tempSymptom, setTempSymptom] = useState(currentSymptom);
+
+  useEffect(() => {
+    setTempSymptom(dvr.faultySymptomStr || defaultSymptom);
+  }, [dvr.faultySymptomStr]);
+
+  const symptomPresets = [
+    'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)',
+    'អេក្រង់ខ្មៅ អត់ចេញរូបភាព (Black screen)',
+    'សញ្ញារូបភាពដាច់ ឬខូច (No Video Signal)',
+    'កាមេរ៉ាដាច់ភ្លើង (No Power Supply / Offline)',
+    'រូបភាពព្រិល ឬកខ្វក់ (Blurry / Dirty Lens)',
+    'ខ្សែបណ្តាញដាច់ (Network Disconnected)',
+  ];
 
   return (
     <div className="bg-white text-slate-950 rounded-2xl shadow-xl overflow-hidden print:p-0 print:m-0 print:border-none print-page border border-slate-300">
@@ -2623,15 +2658,110 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
             </div>
           </div>
 
-          <div className="text-[11px]">
-            <span className="font-semibold text-slate-800">ระบุตัวที่:</span>{' '}
-            <strong className="font-mono text-rose-700 bg-rose-100 px-2 py-0.2 rounded border border-rose-300">
-              {faultyListStr}
-            </strong>
-            <span className="ml-3 font-semibold text-slate-800">อาการ:</span>{' '}
-            <span className="text-slate-700">
-              {faultyCount > 0 ? 'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)' : 'ใช้งานได้ปกติ 100%'}
-            </span>
+          <div className="text-[11px] pt-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-semibold text-slate-800">ระบุตัวที่:</span>{' '}
+              <strong className="font-mono text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
+                {faultyListStr}
+              </strong>
+              <span className="ml-3 font-semibold text-slate-800">อาการ:</span>{' '}
+              {faultyCount > 0 ? (
+                <>
+                  {/* Clean text display for print */}
+                  <span className="hidden print:inline text-slate-900 font-medium">
+                    {currentSymptom}
+                  </span>
+
+                  {/* Interactive UI on screen */}
+                  <span className="print:hidden inline-flex items-center gap-1.5 flex-wrap">
+                    {!isEditingSymptom ? (
+                      <span className="inline-flex items-center gap-1.5 bg-rose-50 text-rose-700 font-medium px-2 py-0.5 rounded border border-rose-200">
+                        <span>{currentSymptom}</span>
+                        {onUpdateSymptom && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTempSymptom(currentSymptom);
+                              setIsEditingSymptom(true);
+                            }}
+                            className="p-0.5 text-sky-700 hover:text-sky-900 bg-white hover:bg-sky-50 rounded border border-sky-300 transition cursor-pointer ml-0.5"
+                            title="កែប្រែរោគសញ្ញា / Edit symptom"
+                          >
+                            <Edit2 className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </span>
+                    ) : (
+                      <div className="w-full mt-1.5 p-2 bg-sky-50 rounded-lg border border-sky-300 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-sky-900 flex items-center gap-1">
+                            <Edit2 className="w-3 h-3 text-sky-600" />
+                            <span>កែប្រែរោគសញ្ញា (Edit Symptom Text)</span>
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const finalSymptom = tempSymptom.trim() || defaultSymptom;
+                                onUpdateSymptom?.(finalSymptom);
+                                setIsEditingSymptom(false);
+                              }}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-[10px] cursor-pointer shadow-xs transition"
+                            >
+                              ✓ រក្សាទុក (Save)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsEditingSymptom(false);
+                                setTempSymptom(currentSymptom);
+                              }}
+                              className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded font-semibold text-[10px] cursor-pointer transition"
+                            >
+                              ✕ បោះបង់
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Input Box */}
+                        <input
+                          type="text"
+                          value={tempSymptom}
+                          onChange={e => setTempSymptom(e.target.value)}
+                          placeholder="បញ្ចូលរោគសញ្ញា / Enter symptom text..."
+                          className="w-full bg-white border border-sky-300 rounded px-2.5 py-1 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-sky-500 font-medium"
+                        />
+
+                        {/* Presets */}
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-semibold text-slate-600">រោគសញ្ញាគំរូ (Quick Presets):</span>
+                          <div className="flex flex-wrap gap-1">
+                            {symptomPresets.map(preset => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setTempSymptom(preset)}
+                                className={`text-[10px] px-2 py-0.5 rounded border transition text-left cursor-pointer ${
+                                  tempSymptom === preset
+                                    ? 'bg-sky-600 text-white border-sky-600 font-bold'
+                                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </span>
+                </>
+              ) : (
+                <span className="text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  ใช้งานได้ปกติ 100%
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

@@ -29,6 +29,7 @@ import {
   Building2,
   Calendar,
   Trash2,
+  RotateCw,
 } from 'lucide-react';
 
 interface ProblemTrackingViewProps {
@@ -39,6 +40,7 @@ interface ProblemTrackingViewProps {
   onUpdateTickets: (tickets: IssueTicket[]) => void;
   onUpdateCameraStatus: (cameraId: string, status: 'working' | 'faulty' | 'offline') => void;
   onPreviewCamera: (camera: Camera) => void;
+  onSyncFromChecklist?: () => void;
 }
 
 export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
@@ -49,6 +51,7 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
   onUpdateTickets,
   onUpdateCameraStatus,
   onPreviewCamera,
+  onSyncFromChecklist,
 }) => {
   const t = translations[lang];
 
@@ -59,6 +62,7 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [locationFilter, setLocationFilter] = useState<string>('all');
+  const [cameraCodeFilter, setCameraCodeFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals
@@ -82,12 +86,44 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
   const filteredTickets = tickets.filter(tkt => {
     if (statusFilter !== 'all' && tkt.status !== statusFilter) return false;
     if (severityFilter !== 'all' && tkt.severity !== severityFilter) return false;
-    if (locationFilter !== 'all' && tkt.locationId !== locationFilter) return false;
+    if (locationFilter !== 'all') {
+      const matchLoc = tkt.locationId === locationFilter;
+      const locObj = locations.find(l => l.id === locationFilter);
+      const matchByName = locObj && (tkt.locationId === locObj.nameEn || tkt.locationId === locObj.nameKm);
+      if (!matchLoc && !matchByName) return false;
+    }
+
+    if (cameraCodeFilter !== 'all') {
+      const targetCam = cameras.find(c => c.id === cameraCodeFilter);
+      if (targetCam) {
+        const camNum = parseInt(targetCam.code.replace(/[^0-9]/g, ''), 10);
+        const matchId = tkt.cameraId === targetCam.id;
+        const matchCode =
+          tkt.cameraId === targetCam.code &&
+          (tkt.locationId === targetCam.locationId ||
+            tkt.description.includes(targetCam.nameEn) ||
+            tkt.description.includes(targetCam.nameKm));
+        const matchDesc =
+          tkt.description.includes(targetCam.code) ||
+          (camNum ? tkt.description.includes(`CAM ${camNum}`) && (tkt.description.includes(targetCam.nameEn) || tkt.description.includes(targetCam.nameKm)) : false);
+        if (!matchId && !matchCode && !matchDesc) return false;
+      } else {
+        if (tkt.cameraId !== cameraCodeFilter && !tkt.description.includes(cameraCodeFilter)) {
+          return false;
+        }
+      }
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const cam = cameras.find(c => c.id === tkt.cameraId);
-      const loc = locations.find(l => l.id === tkt.locationId);
+      const cam = cameras.find(
+        c =>
+          c.id === tkt.cameraId ||
+          (c.code.toLowerCase() === tkt.cameraId.toLowerCase() && c.locationId === tkt.locationId) ||
+          c.code.toLowerCase() === tkt.cameraId.toLowerCase() ||
+          c.id.endsWith(`-${tkt.cameraId}`)
+      );
+      const loc = locations.find(l => l.id === tkt.locationId || l.nameEn === tkt.locationId || l.code === tkt.locationId);
       return (
         tkt.ticketNumber.toLowerCase().includes(q) ||
         (cam && cam.code.toLowerCase().includes(q)) ||
@@ -136,6 +172,20 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
     }
   };
 
+  const handleClearAllTickets = () => {
+    if (tickets.length === 0) return;
+    const count = tickets.length;
+    const confirmMsg =
+      lang === 'km'
+        ? `⚠️ តើអ្នកពិតជាចង់សម្អាតសំបុត្របញ្ហា និងការជួសជុលទាំងអស់ (${count} សំបុត្រ) មែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។`
+        : `⚠️ Are you sure you want to clear all ${count} fault tracking & maintenance tickets? This action cannot be undone.`;
+
+    if (window.confirm(confirmMsg)) {
+      onUpdateTickets([]);
+      setSelectedTicketIds([]);
+    }
+  };
+
   const handleDeleteSingleTicket = (ticketId: string, ticketNumber: string) => {
     const confirmMsg =
       lang === 'km'
@@ -152,7 +202,15 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
   const handleOpenTicketModal = (ticket?: IssueTicket) => {
     if (ticket) {
       setEditingTicket(ticket);
-      setSelectedCameraId(ticket.cameraId);
+      // Synchronize cameraId to exact checklist camera ID
+      const matchedCam = cameras.find(
+        c =>
+          c.id === ticket.cameraId ||
+          (c.code.toLowerCase() === ticket.cameraId.toLowerCase() && c.locationId === ticket.locationId) ||
+          c.code.toLowerCase() === ticket.cameraId.toLowerCase() ||
+          c.id.endsWith(`-${ticket.cameraId}`)
+      );
+      setSelectedCameraId(matchedCam ? matchedCam.id : (ticket.cameraId || cameras[0]?.id || ''));
       setReportedDate(ticket.reportedDate);
       setShift(ticket.shift);
       setReportedBy(ticket.reportedBy);
@@ -182,7 +240,9 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
 
   const handleSaveTicket = (e: React.FormEvent) => {
     e.preventDefault();
-    const cam = cameras.find(c => c.id === selectedCameraId);
+    const cam =
+      cameras.find(c => c.id === selectedCameraId) ||
+      cameras.find(c => c.code === selectedCameraId);
     if (!cam) return;
 
     if (editingTicket) {
@@ -307,6 +367,30 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
             </button>
           )}
 
+          {tickets.length > 0 && (
+            <button
+              onClick={handleClearAllTickets}
+              className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/60 hover:bg-rose-900 border border-rose-800/80 text-rose-300 hover:text-white rounded-xl text-xs font-bold transition shadow-xs"
+              title={lang === 'km' ? 'សម្អាតសំបុត្របញ្ហាទាំងអស់' : 'Clear All Fault Tracking & Dispatch Tickets'}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>{lang === 'km' ? 'សម្អាតទាំងអស់' : 'Clear All'}</span>
+            </button>
+          )}
+
+          {onSyncFromChecklist && (
+            <button
+              onClick={onSyncFromChecklist}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-900/30"
+              title={lang === 'km' ? 'Sync ការត្រួតពិនិត្យ និងបញ្ហាកាមេរ៉ាពី Checklist' : 'Sync CAMERA Inspection & Fault Tracking from Checklist'}
+            >
+              <RotateCw className="w-4 h-4" />
+              <span>
+                {lang === 'km' ? '🔄 Sync ពី Checklist' : '🔄 Sync from Checklist'}
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => exportTicketsToExcel(tickets, cameras, locations, lang)}
             className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
@@ -326,7 +410,7 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
       </div>
 
       {/* Filter Controls Bar */}
-      <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {/* Search */}
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
@@ -337,6 +421,63 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
             placeholder={t.search}
             className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3.5 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
           />
+        </div>
+
+        {/* Location Filter */}
+        <div>
+          <select
+            value={locationFilter}
+            onChange={e => setLocationFilter(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
+          >
+            <option value="all">{t.allLocations}</option>
+            {locations.map(loc => (
+              <option key={loc.id} value={loc.id}>
+                {loc.code}: {lang === 'km' ? loc.nameKm : loc.nameEn}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Camera Code Filter (Synced with Checklist Cameras) */}
+        <div>
+          <select
+            value={cameraCodeFilter}
+            onChange={e => setCameraCodeFilter(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
+          >
+            <option value="all">
+              {lang === 'km' ? 'គ្រប់កូដកាមេរ៉ា (All Camera Codes)' : 'All Camera Codes'}
+            </option>
+            {locations.map(loc => {
+              const locCams = cameras.filter(c => c.locationId === loc.id);
+              if (locCams.length === 0) return null;
+              return (
+                <optgroup
+                  key={loc.id}
+                  label={`[${loc.code}] ${loc.nameEn} (${loc.nameKm})`}
+                  className="bg-slate-900 text-sky-400 font-semibold"
+                >
+                  {locCams.map(cam => (
+                    <option key={cam.id} value={cam.id} className="bg-slate-950 text-white font-normal">
+                      {cam.code} - {cam.nameEn} ({cam.nameKm})
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
+            {cameras.filter(c => !locations.some(l => l.id === c.locationId)).length > 0 && (
+              <optgroup label="Other Cameras" className="bg-slate-900 text-slate-400 font-semibold">
+                {cameras
+                  .filter(c => !locations.some(l => l.id === c.locationId))
+                  .map(cam => (
+                    <option key={cam.id} value={cam.id} className="bg-slate-950 text-white font-normal">
+                      {cam.code} - {cam.nameEn}
+                    </option>
+                  ))}
+              </optgroup>
+            )}
+          </select>
         </div>
 
         {/* Status Filter */}
@@ -366,22 +507,6 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
             <option value="critical">{t.severity_critical}</option>
             <option value="medium">{t.severity_medium}</option>
             <option value="low">{t.severity_low}</option>
-          </select>
-        </div>
-
-        {/* Location Filter */}
-        <div>
-          <select
-            value={locationFilter}
-            onChange={e => setLocationFilter(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
-          >
-            <option value="all">{t.allLocations}</option>
-            {locations.map(loc => (
-              <option key={loc.id} value={loc.id}>
-                {loc.code}: {lang === 'km' ? loc.nameKm : loc.nameEn}
-              </option>
-            ))}
           </select>
         </div>
       </div>
@@ -461,8 +586,14 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
                 </tr>
               ) : (
                 filteredTickets.map(tkt => {
-                  const cam = cameras.find(c => c.id === tkt.cameraId);
-                  const loc = locations.find(l => l.id === tkt.locationId);
+                  const cam = cameras.find(
+                    c =>
+                      c.id === tkt.cameraId ||
+                      (c.code.toLowerCase() === tkt.cameraId.toLowerCase() && c.locationId === tkt.locationId) ||
+                      c.code.toLowerCase() === tkt.cameraId.toLowerCase() ||
+                      c.id.endsWith(`-${tkt.cameraId}`)
+                  );
+                  const loc = locations.find(l => l.id === tkt.locationId || l.nameEn === tkt.locationId || l.code === tkt.locationId);
                   const statusLabel = t[`status_${tkt.status}` as keyof typeof t] || tkt.status;
                   const severityLabel = t[`severity_${tkt.severity}` as keyof typeof t] || tkt.severity;
                   const issueLabel = t[`issue_${tkt.issueType}` as keyof typeof t] || tkt.issueType;
@@ -502,9 +633,9 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
 
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <span className="font-semibold text-slate-200">
-                          {loc ? (lang === 'km' ? loc.nameKm : loc.nameEn) : ''}
+                          {loc ? (lang === 'km' ? loc.nameKm : loc.nameEn) : (tkt.locationId || 'N/A')}
                         </span>
-                        <div className="text-[10px] text-slate-400">{loc?.code}</div>
+                        <div className="text-[10px] text-slate-400">{loc?.code || ''}</div>
                       </td>
 
                       <td className="py-3.5 px-4 max-w-xs">
@@ -606,17 +737,37 @@ export const ProblemTrackingView: React.FC<ProblemTrackingViewProps> = ({
                   <select
                     value={selectedCameraId}
                     onChange={e => setSelectedCameraId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
                     required
                   >
-                    {cameras.map(cam => {
-                      const loc = locations.find(l => l.id === cam.locationId);
+                    {locations.map(loc => {
+                      const locCams = cameras.filter(c => c.locationId === loc.id);
+                      if (locCams.length === 0) return null;
                       return (
-                        <option key={cam.id} value={cam.id}>
-                          {cam.code} - {lang === 'km' ? cam.nameKm : cam.nameEn} ({loc?.code})
-                        </option>
+                        <optgroup
+                          key={loc.id}
+                          label={`[${loc.code}] ${loc.nameEn} (${loc.nameKm})`}
+                          className="bg-slate-900 text-sky-400 font-semibold"
+                        >
+                          {locCams.map(cam => (
+                            <option key={cam.id} value={cam.id} className="bg-slate-950 text-white font-normal">
+                              {cam.code}: {cam.nameEn} • {cam.nameKm}
+                            </option>
+                          ))}
+                        </optgroup>
                       );
                     })}
+                    {cameras.filter(c => !locations.some(l => l.id === c.locationId)).length > 0 && (
+                      <optgroup label="Other Cameras" className="bg-slate-900 text-slate-400 font-semibold">
+                        {cameras
+                          .filter(c => !locations.some(l => l.id === c.locationId))
+                          .map(cam => (
+                            <option key={cam.id} value={cam.id} className="bg-slate-950 text-white font-normal">
+                              {cam.code}: {cam.nameEn} • {cam.nameKm}
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
 

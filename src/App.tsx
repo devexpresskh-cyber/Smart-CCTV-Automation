@@ -8,6 +8,8 @@ import {
   Language,
   ShiftType,
   SmartInspectionReport,
+  SmartReportCamera,
+  DVRProfile,
 } from './types';
 import {
   getStoredLanguage,
@@ -22,6 +24,8 @@ import {
   setStoredTickets,
   resetAllToDefault,
   getStoredDVRProfiles,
+  syncLocationsFromDVRProfiles,
+  syncCamerasFromDVRProfiles,
 } from './utils/storage';
 import { initialDVRProfiles } from './data/smartReportTemplate';
 import { getOverdueCameraAlerts, getDVRHealthAlerts } from './utils/healthAlerts';
@@ -38,10 +42,31 @@ import { translations } from './i18n/translations';
 
 export default function App() {
   const [lang, setLang] = useState<Language>(getStoredLanguage);
-  const [locations, setLocations] = useState<LocationZone[]>(getStoredLocations);
-  const [cameras, setCameras] = useState<Camera[]>(getStoredCameras);
+  const [locations, setLocations] = useState<LocationZone[]>(() => {
+    const profiles = getStoredDVRProfiles();
+    const dvrList = profiles && profiles.length > 0 ? profiles : initialDVRProfiles;
+    return syncLocationsFromDVRProfiles(dvrList);
+  });
+  const [cameras, setCameras] = useState<Camera[]>(() => {
+    const profiles = getStoredDVRProfiles();
+    const dvrList = profiles && profiles.length > 0 ? profiles : initialDVRProfiles;
+    return syncCamerasFromDVRProfiles(dvrList);
+  });
   const [inspections, setInspections] = useState<InspectionRecord[]>(getStoredInspections);
   const [tickets, setTickets] = useState<IssueTicket[]>(getStoredTickets);
+
+  // Sync locations & cameras from DVR profiles on load
+  useEffect(() => {
+    const profiles = getStoredDVRProfiles();
+    const dvrList = profiles && profiles.length > 0 ? profiles : initialDVRProfiles;
+    const syncedLocs = syncLocationsFromDVRProfiles(dvrList);
+    setLocations(syncedLocs);
+    setStoredLocations(syncedLocs);
+
+    const syncedCams = syncCamerasFromDVRProfiles(dvrList);
+    setCameras(syncedCams);
+    setStoredCameras(syncedCams);
+  }, []);
 
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [presetShift, setPresetShift] = useState<ShiftType | undefined>(undefined);
@@ -71,8 +96,12 @@ export default function App() {
   // Reset sample data
   const handleResetData = () => {
     const fresh = resetAllToDefault();
-    setLocations(fresh.locations);
-    setCameras(fresh.cameras);
+    const syncedLocs = syncLocationsFromDVRProfiles(initialDVRProfiles);
+    const syncedCams = syncCamerasFromDVRProfiles(initialDVRProfiles);
+    setLocations(syncedLocs);
+    setStoredLocations(syncedLocs);
+    setCameras(syncedCams);
+    setStoredCameras(syncedCams);
     setInspections(fresh.inspections);
     setTickets(fresh.tickets);
     showToast(
@@ -103,7 +132,19 @@ export default function App() {
     setTickets(newTickets);
     setStoredTickets(newTickets);
     showToast(
-      lang === 'km' ? 'បានធ្វើបច្ចុប្បន្នភាពសំបុត្របញ្ហា' : 'Issue tickets updated'
+      lang === 'km'
+        ? (newTickets.length === 0 ? 'បានសម្អាតសំបុត្របញ្ហាទាំងអស់ដោយជោគជ័យ' : 'បានធ្វើបច្ចុប្បន្នភាពសំបុត្របញ្ហា')
+        : (newTickets.length === 0 ? 'All issue tickets cleared successfully' : 'Issue tickets updated')
+    );
+  };
+
+  const handleUpdateInspections = (newInspections: InspectionRecord[]) => {
+    setInspections(newInspections);
+    setStoredInspections(newInspections);
+    showToast(
+      lang === 'km'
+        ? (newInspections.length === 0 ? 'បានសម្អាតកំណត់ត្រាត្រួតពិនិត្យ CCTV ទាំងអស់' : 'បានធ្វើបច្ចុប្បន្នភាពកំណត់ត្រាត្រួតពិនិត្យ')
+        : (newInspections.length === 0 ? 'All CCTV inspection logs cleared' : 'Inspection records updated')
     );
   };
 
@@ -177,23 +218,35 @@ export default function App() {
       smartReport.signOff?.itOfficer?.trim() ||
       (lang === 'km' ? 'មន្ត្រីសន្តិសុខ IT' : 'IT Security Officer');
 
-    // 1. Update camera statuses & lastCheckedAt
-    const updatedCameras = cameras.map((cam, idx) => {
-      const reportCam =
-        smartReport.cameras.find(c => c.number === idx + 1) ||
-        smartReport.cameras[idx % smartReport.cameras.length];
+    // DVR profiles lookup to sync location from DVR Name & custom symptom
+    const profiles = getStoredDVRProfiles();
+    const dvrList = profiles && profiles.length > 0 ? profiles : initialDVRProfiles;
+    const matchingDvr = dvrList.find(d => d.name === smartReport.zone || d.id === smartReport.zone) || dvrList[0];
+    const customSymptom = matchingDvr?.faultySymptomStr || smartReport.faultySymptomStr || 'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)';
 
-      if (reportCam && (reportCam.dayStatus === 'issue' || reportCam.nightStatus === 'issue')) {
-        return {
-          ...cam,
-          status: 'faulty' as const,
-          notes: reportCam.symptom || 'នៅអេក្រង់មិនបង្ហាញរូបភាព (Black screen)',
-          lastCheckedAt: nowIso,
-        };
+    // Ensure locations & cameras are synchronized from DVR names
+    const syncedLocations = syncLocationsFromDVRProfiles(dvrList);
+    setLocations(syncedLocations);
+    setStoredLocations(syncedLocations);
+
+    const freshCameras = syncCamerasFromDVRProfiles(dvrList);
+
+    // 1. Update camera statuses & lastCheckedAt
+    const updatedCameras = freshCameras.map(cam => {
+      if (cam.locationId === matchingDvr?.id) {
+        const camNum = parseInt(cam.code.replace(/[^0-9]/g, ''), 10);
+        const reportCam = smartReport.cameras.find(c => c.number === camNum);
+        if (reportCam && (reportCam.dayStatus === 'issue' || reportCam.nightStatus === 'issue')) {
+          return {
+            ...cam,
+            status: 'faulty' as const,
+            notes: reportCam.symptom || customSymptom,
+            lastCheckedAt: nowIso,
+          };
+        }
       }
       return {
         ...cam,
-        status: 'working' as const,
         lastCheckedAt: nowIso,
       };
     });
@@ -201,12 +254,11 @@ export default function App() {
     setStoredCameras(updatedCameras);
 
     // 2. Automatically create & persist InspectionRecord in CCTV Inspection Log
-    const items: InspectionItem[] = cameras.map((cam, idx) => {
-      const reportCam =
-        smartReport.cameras.find(c => c.number === idx + 1) ||
-        smartReport.cameras[idx % smartReport.cameras.length];
-      const hasIssue =
-        reportCam && (reportCam.dayStatus === 'issue' || reportCam.nightStatus === 'issue');
+    const items: InspectionItem[] = updatedCameras.map(cam => {
+      const isThisDvr = cam.locationId === matchingDvr?.id;
+      const camNum = parseInt(cam.code.replace(/[^0-9]/g, ''), 10);
+      const reportCam = isThisDvr ? smartReport.cameras.find(c => c.number === camNum) : undefined;
+      const hasIssue = reportCam && (reportCam.dayStatus === 'issue' || reportCam.nightStatus === 'issue');
 
       return {
         cameraId: cam.id,
@@ -214,7 +266,7 @@ export default function App() {
         issueType: hasIssue ? ('no_signal' as const) : undefined,
         issueSeverity: hasIssue ? ('critical' as const) : undefined,
         notes: hasIssue
-          ? reportCam?.symptom || 'នៅអេក្រង់មិនបង្ហាញរូបភាព (Black screen)'
+          ? reportCam?.symptom || customSymptom
           : undefined,
       };
     });
@@ -230,7 +282,7 @@ export default function App() {
       inspectorRole: 'IT Security & Surveillance Lead',
       completedAt: nowIso,
       items,
-      overallNotes: `Weekly Checklist Audit [${smartReport.zone || 'DVR'}] - ${
+      overallNotes: `Weekly Checklist Audit [${matchingDvr?.name || smartReport.zone || 'DVR'}] - ${
         issueCount > 0
           ? `${issueCount} cameras reported faulty (${smartReport.faultyListStr || ''})`
           : 'All channels verified working 100%'
@@ -252,24 +304,28 @@ export default function App() {
 
     const newTickets: IssueTicket[] = faultyReportCameras.map((c, i) => {
       const cam =
-        cameras.find(camItem => camItem.code === `CAM-${String(c.number).padStart(2, '0')}`) ||
-        cameras[c.number - 1] ||
-        cameras[0];
+        updatedCameras.find(
+          camItem =>
+            camItem.locationId === matchingDvr?.id &&
+            camItem.code === `CAM-${String(c.number).padStart(2, '0')}`
+        ) ||
+        updatedCameras.find(camItem => camItem.id === `cam-${matchingDvr?.id}-${c.number}`) ||
+        updatedCameras[0];
 
       return {
         id: `tkt-smart-${Date.now()}-${i}`,
         ticketNumber: `TKT-2026-${String(Math.floor(100 + Math.random() * 899))}`,
-        cameraId: cam?.id || `cam-${c.number}`,
-        locationId: cam?.locationId || 'loc-01',
+        cameraId: cam?.id || `cam-${matchingDvr?.id}-${c.number}`,
+        locationId: matchingDvr?.id || 'dvr-01', // Direct location sync from DVR Name
         reportedDate: formattedDate,
         shift: smartReport.shift || 'day',
         reportedBy: inspectorName,
         issueType: 'no_signal' as const,
         severity: 'critical' as const,
         status: 'reported' as const,
-        description: `[${smartReport.zone || 'DVR'}] CAM ${c.number} (${
+        description: `[${matchingDvr?.name || smartReport.zone || 'DVR'}] CAM ${c.number} (${
           c.nameThai || c.nameKm || cam?.nameKm || 'Camera'
-        }): ${c.symptom || 'នៅអេក្រង់មិនបង្ហាញរូបភាព (Black screen)'}`,
+        }): ${c.symptom || customSymptom}`,
         assignedTo:
           smartReport.signOff?.maintenanceLead?.trim() ||
           (lang === 'km' ? 'ក្រុមជាងជួសជុលបន្ទាន់' : 'Emergency Maintenance Tech'),
@@ -290,7 +346,7 @@ export default function App() {
     );
   };
 
-  // Sync CAMERA Inspection directly from all DVR checklists
+  // Sync CAMERA Inspection and Fault Tracking & Maintenance Dispatch directly from all DVR checklists
   const handleSyncCameraInspectionFromChecklist = (targetShift?: ShiftType) => {
     const profiles = getStoredDVRProfiles();
     const dvrList = profiles && profiles.length > 0 ? profiles : initialDVRProfiles;
@@ -298,16 +354,18 @@ export default function App() {
     const todayStr = new Date().toISOString().slice(0, 10);
     const activeShift: ShiftType = targetShift || presetShift || 'day';
 
-    // Collect all checklist cameras across all DVRs
-    const allChecklistCams = dvrList.flatMap(d => d.cameras || []);
+    // Sync locations from DVR names
+    const syncedLocs = syncLocationsFromDVRProfiles(dvrList);
+    setLocations(syncedLocs);
+    setStoredLocations(syncedLocs);
+
+    const freshCameras = syncCamerasFromDVRProfiles(dvrList);
 
     // 1. Update camera statuses & lastCheckedAt
-    const updatedCameras = cameras.map((cam, idx) => {
-      const camNum = parseInt(cam.code.replace(/[^0-9]/g, ''), 10) || (idx + 1);
-      const matched =
-        allChecklistCams.find(c => c.number === camNum) ||
-        allChecklistCams[idx % allChecklistCams.length];
-
+    const updatedCameras = freshCameras.map(cam => {
+      const dvr = dvrList.find(d => d.id === cam.locationId);
+      const camNum = parseInt(cam.code.replace(/[^0-9]/g, ''), 10);
+      const matched = dvr?.cameras?.find((c: any) => c.number === camNum);
       const hasIssue = matched
         ? activeShift === 'day'
           ? matched.dayStatus === 'issue'
@@ -318,7 +376,7 @@ export default function App() {
         return {
           ...cam,
           status: 'faulty' as const,
-          notes: matched?.symptom || 'នៅអេក្រង់មិនបង្ហាញរូបភាព (Black screen)',
+          notes: matched?.symptom || (dvr?.faultySymptomStr || 'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)'),
           lastCheckedAt: nowIso,
         };
       }
@@ -332,25 +390,14 @@ export default function App() {
     setStoredCameras(updatedCameras);
 
     // 2. Generate and save InspectionRecord in CCTV Inspection Log
-    const items: InspectionItem[] = cameras.map((cam, idx) => {
-      const camNum = parseInt(cam.code.replace(/[^0-9]/g, ''), 10) || (idx + 1);
-      const matched =
-        allChecklistCams.find(c => c.number === camNum) ||
-        allChecklistCams[idx % allChecklistCams.length];
-      const hasIssue = matched
-        ? activeShift === 'day'
-          ? matched.dayStatus === 'issue'
-          : matched.nightStatus === 'issue'
-        : false;
-
+    const items: InspectionItem[] = updatedCameras.map(cam => {
+      const hasIssue = cam.status !== 'working';
       return {
         cameraId: cam.id,
         status: hasIssue ? 'issue' : 'ok',
         issueType: hasIssue ? ('no_signal' as const) : undefined,
         issueSeverity: hasIssue ? ('critical' as const) : undefined,
-        notes: hasIssue
-          ? matched?.symptom || 'នៅអេក្រង់មិនបង្ហាញរូបភាព (Black screen)'
-          : undefined,
+        notes: hasIssue ? cam.notes : undefined,
       };
     });
 
@@ -376,29 +423,39 @@ export default function App() {
     setInspections(updatedInspections);
     setStoredInspections(updatedInspections);
 
-    // 3. Auto-generate IssueTickets for faulty cameras if any
-    const faultyItems = items.filter(i => i.status === 'issue');
-    const newTickets: IssueTicket[] = faultyItems.map((item, i) => {
-      const cam = cameras.find(c => c.id === item.cameraId) || cameras[0];
-      const matched = allChecklistCams.find(
-        c => c.number === (parseInt(cam.code.replace(/[^0-9]/g, ''), 10) || i + 1)
-      );
+    // 3. Auto-generate IssueTickets across ALL DVRs where cameras have issues
+    const newTickets: IssueTicket[] = [];
+    (dvrList as DVRProfile[]).forEach(dvr => {
+      const dvrCams = dvr.cameras || [];
+      const dvrSymptom = dvr.faultySymptomStr || 'ที่หน้าจอภาพไม่แสดงภาพจากกล้องวงจรปิด (Black screen)';
 
-      return {
-        id: `tkt-sync-${Date.now()}-${i}`,
-        ticketNumber: `TKT-2026-${String(Math.floor(200 + Math.random() * 799))}`,
-        cameraId: cam.id,
-        locationId: cam.locationId || 'loc-01',
-        reportedDate: todayStr,
-        shift: activeShift,
-        reportedBy: lang === 'km' ? 'មន្ត្រីសន្តិសុខ IT' : 'IT Surveillance Lead',
-        issueType: 'no_signal' as const,
-        severity: 'critical' as const,
-        status: 'reported' as const,
-        description: `CAM ${cam.code} (${matched?.nameThai || cam.nameKm}): ${item.notes || 'Black screen'} [Synced from Checklist]`,
-        assignedTo: lang === 'km' ? 'ក្រុមជាងជួសជុលបន្ទាន់' : 'Emergency Maintenance Tech',
-        repairCost: 0,
-      };
+      dvrCams.forEach((c: SmartReportCamera) => {
+        const hasIssue = activeShift === 'day' ? c.dayStatus === 'issue' : c.nightStatus === 'issue';
+        if (hasIssue) {
+          const matchingCam = updatedCameras.find(
+            camItem =>
+              camItem.locationId === dvr.id &&
+              (camItem.code === `CAM-${String(c.number).padStart(2, '0')}` ||
+                camItem.id === `cam-${dvr.id}-${c.number}`)
+          ) || updatedCameras.find(camItem => camItem.id === `cam-${dvr.id}-${c.number}`);
+
+          newTickets.push({
+            id: `tkt-sync-${dvr.id}-${c.number}-${Date.now()}`,
+            ticketNumber: `TKT-2026-${String(Math.floor(100 + Math.random() * 899))}`,
+            cameraId: matchingCam?.id || `cam-${dvr.id}-${c.number}`,
+            locationId: dvr.id, // Synced from DVR Name!
+            reportedDate: todayStr,
+            shift: activeShift,
+            reportedBy: lang === 'km' ? 'មន្ត្រីសន្តិសុខ IT' : 'IT Surveillance Lead',
+            issueType: 'no_signal' as const,
+            severity: 'critical' as const,
+            status: 'reported' as const,
+            description: `[${dvr.name}] CAM ${c.number} (${c.nameThai || c.nameKm || 'Camera'}): ${c.symptom || dvrSymptom}`,
+            assignedTo: lang === 'km' ? 'ក្រុមជាងជួសជុលបន្ទាន់' : 'Emergency Maintenance Tech',
+            repairCost: 0,
+          });
+        }
+      });
     });
 
     if (newTickets.length > 0) {
@@ -409,8 +466,8 @@ export default function App() {
 
     showToast(
       lang === 'km'
-        ? `✓ បាន Sync ការត្រួតពិនិត្យកាមេរ៉ាពី Checklist (${activeShift === 'day' ? 'វេនថ្ងៃ' : 'វេនយប់'}) ជោគជ័យ! (${normalCount} OK, ${issueCount} បញ្ហា)`
-        : `✓ Synced CAMERA Inspection from checklist (${activeShift.toUpperCase()} Shift): ${normalCount} OK, ${issueCount} issues!`
+        ? `✓ បាន Sync ការត្រួតពិនិត្យកាមេរ៉ា និងបញ្ហាពី Checklist (${activeShift === 'day' ? 'វេនថ្ងៃ' : 'វេនយប់'}) ជោគជ័យ! (${normalCount} OK, ${issueCount} បញ្ហា, ${newTickets.length} សំបុត្របញ្ហា)`
+        : `✓ Synced CAMERA Inspection & Fault Tracking from checklist (${activeShift.toUpperCase()} Shift): ${normalCount} OK, ${issueCount} issues, ${newTickets.length} tickets created!`
     );
   };
 
@@ -537,6 +594,7 @@ export default function App() {
               onSaveInspection={handleSaveInspection}
               onPreviewCamera={setPreviewCamera}
               onSyncFromChecklist={handleSyncCameraInspectionFromChecklist}
+              onUpdateInspections={handleUpdateInspections}
             />
           )}
 
@@ -578,6 +636,7 @@ export default function App() {
               onUpdateTickets={handleUpdateTickets}
               onUpdateCameraStatus={handleUpdateCameraStatus}
               onPreviewCamera={setPreviewCamera}
+              onSyncFromChecklist={handleSyncCameraInspectionFromChecklist}
             />
           )}
         </main>
