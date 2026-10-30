@@ -6,9 +6,18 @@ import {
   ShiftType,
   DVRProfile,
   DVRCheckStatus,
+  ChecklistHeaderConfig,
 } from '../types';
 import { initialDVRProfiles, defaultDVRCheck } from '../data/smartReportTemplate';
-import { getStoredDVRProfiles, setStoredDVRProfiles, hydrateDVRProfilesWithIDB } from '../utils/storage';
+import {
+  getStoredDVRProfiles,
+  setStoredDVRProfiles,
+  hydrateDVRProfilesWithIDB,
+  getStoredChecklistHeaderConfig,
+  setStoredChecklistHeaderConfig,
+  hydrateChecklistLogoWithIDB,
+  defaultChecklistHeaderConfig,
+} from '../utils/storage';
 import { compressImage } from '../utils/idbStorage';
 import { translations } from '../i18n/translations';
 import { downloadCsvFile } from '../utils/exportUtils';
@@ -46,6 +55,7 @@ import {
   Download,
   BookOpen,
   Sliders,
+  SlidersHorizontal,
   ExternalLink,
   Clipboard,
   HardDrive,
@@ -155,6 +165,100 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   const [statusModalCapacity, setStatusModalCapacity] = useState<string>('12TB');
   const [statusModalDiskCheck, setStatusModalDiskCheck] = useState<string>('Checking Disk 100%: OK');
   const [statusModalApplyAll, setStatusModalApplyAll] = useState<boolean>(false);
+
+  // Checklist Header Configuration (Logo, Year, Company, 1-Page Fit)
+  const [headerConfig, setHeaderConfig] = useState<ChecklistHeaderConfig>(getStoredChecklistHeaderConfig);
+
+  // Hydrate custom logo from IndexedDB
+  useEffect(() => {
+    hydrateChecklistLogoWithIDB(headerConfig).then(hydrated => {
+      if (hydrated.logoUrl && hydrated.logoUrl !== headerConfig.logoUrl) {
+        setHeaderConfig(hydrated);
+      }
+    });
+  }, []);
+
+  // Header Modal States
+  const [isEditHeaderModalOpen, setIsEditHeaderModalOpen] = useState(false);
+  const [modalCompanyName, setModalCompanyName] = useState(headerConfig.companyName);
+  const [modalCompanySubName, setModalCompanySubName] = useState(headerConfig.companySubName);
+  const [modalYear, setModalYear] = useState<number | string>(headerConfig.year);
+  const [modalFormCode, setModalFormCode] = useState(headerConfig.formCode);
+  const [modalLogoUrl, setModalLogoUrl] = useState(headerConfig.logoUrl || '');
+  const [modalFitToOnePage, setModalFitToOnePage] = useState(headerConfig.fitToOnePage !== false);
+  const [modalIncludeScreenshots, setModalIncludeScreenshots] = useState(headerConfig.includeScreenshotsInPrint === true);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleOpenHeaderModal = () => {
+    setModalCompanyName(headerConfig.companyName);
+    setModalCompanySubName(headerConfig.companySubName);
+    setModalYear(headerConfig.year);
+    setModalFormCode(headerConfig.formCode);
+    setModalLogoUrl(headerConfig.logoUrl || '');
+    setModalFitToOnePage(headerConfig.fitToOnePage !== false);
+    setModalIncludeScreenshots(headerConfig.includeScreenshotsInPrint === true);
+    setIsEditHeaderModalOpen(true);
+  };
+
+  const handleUploadLogoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImage(file, 400, 0.85);
+      setModalLogoUrl(compressed);
+    } catch (err) {
+      console.error('Logo compression failed', err);
+    }
+  };
+
+  const handleSaveHeaderModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    const updated: ChecklistHeaderConfig = {
+      ...headerConfig,
+      companyName: modalCompanyName.trim() || 'TK Garment',
+      companySubName: modalCompanySubName.trim() || 'Sisophon Co., Ltd.',
+      year: modalYear || 2026,
+      formCode: modalFormCode.trim() || 'F-IT-002 REW.00 Date 22/03/2024',
+      logoUrl: modalLogoUrl,
+      fitToOnePage: modalFitToOnePage,
+      includeScreenshotsInPrint: modalIncludeScreenshots,
+    };
+    setHeaderConfig(updated);
+    setStoredChecklistHeaderConfig(updated);
+    setIsEditHeaderModalOpen(false);
+    showFeedback(lang === 'km' ? '✓ បានរក្សាទុក Logo ឆ្នាំ និងទម្រង់ 1-Page ជោគជ័យ!' : '✓ Logo, Year & Page settings saved!');
+  };
+
+  const handleQuickChangeYear = (newYear: number | string) => {
+    const updated = { ...headerConfig, year: newYear };
+    setHeaderConfig(updated);
+    setStoredChecklistHeaderConfig(updated);
+    showFeedback(lang === 'km' ? `✓ បានប្តូរឆ្នាំទៅជា ${newYear}` : `✓ Year changed to ${newYear}`);
+  };
+
+  const handleQuickToggleFitPage = () => {
+    const nextVal = !headerConfig.fitToOnePage;
+    const updated = { ...headerConfig, fitToOnePage: nextVal };
+    setHeaderConfig(updated);
+    setStoredChecklistHeaderConfig(updated);
+    showFeedback(
+      nextVal
+        ? (lang === 'km' ? '✓ បានបើកមុខងារបង្រួមត្រឹម ១ ទំព័រ A4' : '✓ 1-Page A4 fit enabled')
+        : (lang === 'km' ? '✓ បានបិទមុខងារបង្រួមត្រឹម ១ ទំព័រ A4' : '✓ Standard layout enabled')
+    );
+  };
+
+  const handleQuickToggleScreenshots = () => {
+    const nextVal = !headerConfig.includeScreenshotsInPrint;
+    const updated = { ...headerConfig, includeScreenshotsInPrint: nextVal };
+    setHeaderConfig(updated);
+    setStoredChecklistHeaderConfig(updated);
+    showFeedback(
+      nextVal
+        ? (lang === 'km' ? '✓ ភ្ជាប់រូបថតអេក្រង់ក្នុងពេល Print (ទំព័រទី ២)' : '✓ Screenshots will be included in Print (Page 2)')
+        : (lang === 'km' ? '✓ បោះពុម្ពតែទម្រង់ Check-list ត្រឹម ១ ទំព័រ' : '✓ Print Checklist only (No screenshots)')
+    );
+  };
 
   const dayFileInputRef = useRef<HTMLInputElement>(null);
   const nightFileInputRef = useRef<HTMLInputElement>(null);
@@ -700,12 +804,12 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     if (onSyncWithSystem) {
       const report: SmartInspectionReport = {
         id: `smart-rep-${Date.now()}`,
-        formCode: 'F-IT-002 REW.00 Date 22/03/2024',
-        companyName: 'TK Garment',
-        companySubName: 'Sisophon Co., Ltd.',
-        titleKm: 'ទម្រង់ត្រួតពិនិត្យ CCTV និង DVR សម្រាប់ឆ្នាំ 2026',
-        titleTh: 'แบบฟอร์มตรวจสอบกล้องวงจรปิด และเครื่องบันทึกภาพ ประจำปี 2026',
-        year: 2026,
+        formCode: headerConfig.formCode || 'F-IT-002 REW.00 Date 22/03/2024',
+        companyName: headerConfig.companyName || 'TK Garment',
+        companySubName: headerConfig.companySubName || 'Sisophon Co., Ltd.',
+        titleKm: `ទម្រង់ត្រួតពិនិត្យ CCTV និង DVR សម្រាប់ឆ្នាំ ${headerConfig.year || 2026}`,
+        titleTh: `แบบฟอร์มตรวจสอบกล้องวงจรปิด และเครื่องบันทึกภาพ ประจำปี ${headerConfig.year || 2026}`,
+        year: typeof headerConfig.year === 'number' ? headerConfig.year : parseInt(String(headerConfig.year), 10) || 2026,
         zone: activeDvr.name,
         inspectionDate,
         shift: 'day',
@@ -1041,8 +1145,17 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             </button>
 
             <button
+              onClick={handleOpenHeaderModal}
+              className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+              title="ប្តូរ Logo ក្រុមហ៊ុន ឆ្នាំ និងទម្រង់ 1-Page / Change Checklist Logo & Year"
+            >
+              <Sliders className="w-4 h-4 text-amber-200" />
+              <span>{lang === 'km' ? '🖼️ Logo & ឆ្នាំ (Settings)' : '🖼️ Logo & Year Settings'}</span>
+            </button>
+
+            <button
               onClick={() => setViewMode(viewMode === 'single' ? 'packet' : 'single')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition border ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
                 viewMode === 'packet'
                   ? 'bg-sky-600 text-white border-sky-500'
                   : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700'
@@ -1054,7 +1167,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
             <button
               onClick={() => window.print()}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
             >
               <Printer className="w-4 h-4" />
               <span>បោះពុម្ព / PDF</span>
@@ -1062,30 +1175,81 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
           </div>
         </div>
 
-        {/* Week & Date Selector Bar */}
+        {/* Week & Date Selector Bar + Quick Logo/Year/1-Page Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800 text-xs">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-sky-400" />
-            <span className="text-slate-400 font-semibold">សប្តាហ៍ត្រួតពិនិត្យ:</span>
-            <select
-              value={selectedWeek}
-              onChange={e => setSelectedWeek(e.target.value)}
-              className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-semibold focus:outline-none focus:border-sky-500"
-            >
-              <option value="Week 42 (12-18 Oct 2026)">Week 42 (12-18 Oct 2026) [សប្តាហ៍បច្ចុប្បន្ន]</option>
-              <option value="Week 41 (05-11 Oct 2026)">Week 41 (05-11 Oct 2026) [សប្តាហ៍មុន]</option>
-              <option value="Week 43 (19-25 Oct 2026)">Week 43 (19-25 Oct 2026)</option>
-            </select>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-sky-400" />
+              <span className="text-slate-400 font-semibold">សប្តាហ៍ត្រួតពិនិត្យ:</span>
+              <select
+                value={selectedWeek}
+                onChange={e => setSelectedWeek(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-semibold focus:outline-none focus:border-sky-500"
+              >
+                <option value="Week 42 (12-18 Oct 2026)">Week 42 (12-18 Oct 2026) [សប្តាហ៍បច្ចុប្បន្ន]</option>
+                <option value="Week 41 (05-11 Oct 2026)">Week 41 (05-11 Oct 2026) [សប្តាហ៍មុន]</option>
+                <option value="Week 43 (19-25 Oct 2026)">Week 43 (19-25 Oct 2026)</option>
+              </select>
+            </div>
+
+            {/* Quick Year Selector */}
+            <div className="flex items-center gap-1.5 pl-1 border-l border-slate-800">
+              <span className="text-slate-400 font-semibold">ឆ្នាំ (Year):</span>
+              <select
+                value={headerConfig.year}
+                onChange={e => handleQuickChangeYear(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-0.5 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-sky-500"
+                title="ប្តូរឆ្នាំទម្រង់ត្រួតពិនិត្យ / Change Checklist Year"
+              >
+                {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(yr => (
+                  <option key={yr} value={yr}>
+                    {yr}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            <span>កាលបរិច្ឆេទត្រួតពិនិត្យ:</span>
-            <input
-              type="text"
-              value={inspectionDate}
-              onChange={e => setInspectionDate(e.target.value)}
-              className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono text-white w-28 text-center"
-            />
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Quick 1-Page Fit Toggle */}
+            <button
+              type="button"
+              onClick={handleQuickToggleFitPage}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition border cursor-pointer ${
+                headerConfig.fitToOnePage !== false
+                  ? 'bg-emerald-950/70 text-emerald-300 border-emerald-600/50 shadow-xs'
+                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+              }`}
+              title="បង្រួមទម្រង់ឱ្យត្រូវនឹងក្រដាស A4 ចំនួន ១ សន្លឹកគត់ពេលបោះពុម្ព (Fit on 1 page A4)"
+            >
+              <span className="text-xs">{headerConfig.fitToOnePage !== false ? '☑' : '☐'}</span>
+              <span>{lang === 'km' ? 'បង្រួម ១ ទំព័រ A4' : 'Fit to 1 Page'}</span>
+            </button>
+
+            {/* Quick Include Screenshots in Print Toggle */}
+            <button
+              type="button"
+              onClick={handleQuickToggleScreenshots}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition border cursor-pointer ${
+                headerConfig.includeScreenshotsInPrint
+                  ? 'bg-sky-950/70 text-sky-300 border-sky-600/50 shadow-xs'
+                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+              }`}
+              title="បើក/បិទ ការភ្ជាប់រូបថតអេក្រង់ពេលបោះពុម្ព (Include Screenshots on Page 2 in Print)"
+            >
+              <span className="text-xs">{headerConfig.includeScreenshotsInPrint ? '☑' : '☐'}</span>
+              <span>{lang === 'km' ? 'ភ្ជាប់រូបពេល Print (P2)' : 'Screenshots in Print'}</span>
+            </button>
+
+            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <span>កាលបរិច្ឆេទត្រួតពិនិត្យ:</span>
+              <input
+                type="text"
+                value={inspectionDate}
+                onChange={e => setInspectionDate(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono text-white w-28 text-center"
+              />
+            </div>
           </div>
         </div>
 
@@ -1735,6 +1899,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             inspectionDate={inspectionDate}
             dayScreenshot={dayScreenshot}
             nightScreenshot={nightScreenshot}
+            headerConfig={headerConfig}
+            onOpenHeaderModal={handleOpenHeaderModal}
+            onUpdateYear={handleQuickChangeYear}
             onToggleCheck={handleToggleCheck}
             onEditCamera={idx => {
               setEditingDvrId(activeDvr.id);
@@ -1780,6 +1947,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                   nightScreenshot={nightImg}
                   pageNumber={idx + 1}
                   isMultiPagePacket
+                  headerConfig={headerConfig}
+                  onOpenHeaderModal={handleOpenHeaderModal}
+                  onUpdateYear={handleQuickChangeYear}
                   onToggleCheck={(camNum, shift) => handlePacketToggleCheck(dvr.id, camNum, shift)}
                   onEditCamera={camIdx => {
                     setEditingDvrId(dvr.id);
@@ -2395,6 +2565,217 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Edit Checklist Header / Logo / Year / Page Fit Modal */}
+      {isEditHeaderModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div>
+                <h3 className="font-bold text-base text-white flex items-center gap-2">
+                  <SlidersHorizontal className="w-5 h-5 text-amber-400" />
+                  <span>កំណត់ Logo, ឆ្នាំ និងទម្រង់ Check-list (Header & Page Setup)</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ប្តូរ Logo ក្រុមហ៊ុន, ឆ្នាំរបាយការណ៍, លេខកូដទម្រង់ និងកំណត់ទំហំ 1-Page A4
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditHeaderModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveHeaderModal} className="space-y-4">
+              {/* Logo Upload Section */}
+              <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
+                <label className="block text-xs font-semibold text-slate-200">
+                  Logo ក្រុមហ៊ុន (Company Logo / Badge)
+                </label>
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl border-2 border-dashed border-slate-700 bg-slate-900 flex items-center justify-center overflow-hidden shrink-0">
+                    {modalLogoUrl ? (
+                      <img src={modalLogoUrl} alt="Logo Preview" className="w-full h-full object-contain p-1" />
+                    ) : (
+                      <div className="flex items-center justify-center w-12 h-12 rounded border-2 border-amber-600 bg-white text-amber-600 font-extrabold text-xl font-serif">
+                        TK
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => logoFileInputRef.current?.click()}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload Logo ថ្មី</span>
+                      </button>
+                      {modalLogoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setModalLogoUrl('')}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-300 rounded-lg text-xs font-semibold transition"
+                        >
+                          កំណត់មក TK Badge
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      ref={logoFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadLogoFile}
+                      className="hidden"
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      គាំទ្ររូបភាព PNG, JPG, WebP ឬ SVG។ រូបភាពនឹងត្រូវបានរក្សាទុកដោយស្វ័យប្រវត្តិ។
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Company Name & Subtitle */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    ឈ្មោះក្រុមហ៊ុនធំ (Company Name)
+                  </label>
+                  <input
+                    type="text"
+                    value={modalCompanyName}
+                    onChange={e => setModalCompanyName(e.target.value)}
+                    placeholder="TK Garment"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    ឈ្មោះសាខា / បន្ទាប់បន្សំ (Sub-name)
+                  </label>
+                  <input
+                    type="text"
+                    value={modalCompanySubName}
+                    onChange={e => setModalCompanySubName(e.target.value)}
+                    placeholder="Sisophon Co., Ltd."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Year Selector */}
+              <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
+                <label className="block text-xs font-semibold text-slate-200">
+                  ឆ្នាំរបាយការណ៍ (Inspection Checklist Year)
+                </label>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(yr => (
+                    <button
+                      type="button"
+                      key={yr}
+                      onClick={() => setModalYear(yr)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition ${
+                        String(modalYear) === String(yr)
+                          ? 'bg-amber-600 text-white border-amber-400 shadow-xs'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {yr}
+                    </button>
+                  ))}
+                  <div className="flex items-center gap-1 ml-auto">
+                    <span className="text-[10px] text-slate-400">Custom:</span>
+                    <input
+                      type="text"
+                      value={modalYear}
+                      onChange={e => setModalYear(e.target.value)}
+                      className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white font-mono text-center"
+                      placeholder="YYYY"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  បង្ហាញក្នុងក្បាលទំព័រ៖ «ទម្រង់ត្រួតពិនិត្យ CCTV និង DVR សម្រាប់ឆ្នាំ {modalYear}» និង «แบบฟอร์มตรวจสอบกล้องวงจรปิด... ประจำปี {modalYear}»
+                </p>
+              </div>
+
+              {/* Form Code */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  លេខកូដទម្រង់ & កាលបរិច្ឆេទ (Form Code / Revision)
+                </label>
+                <input
+                  type="text"
+                  value={modalFormCode}
+                  onChange={e => setModalFormCode(e.target.value)}
+                  placeholder="F-IT-002 REW.00 Date 22/03/2024"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {/* 1-Page Fit & Screenshot Print Toggles */}
+              <div className="space-y-2 pt-1">
+                <label className="p-3 bg-slate-950/80 border border-slate-800 hover:border-slate-700 rounded-xl flex items-center justify-between cursor-pointer">
+                  <div className="pr-2">
+                    <p className="text-xs font-bold text-slate-200">
+                      📄 បង្រួមទម្រង់ Checklist ឱ្យត្រូវ ១ ទំព័រ A4 (Fit to 1 Page A4)
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      កែសម្រួលគម្លាតបន្ទាត់ និងទំហំអក្សរយ៉ាងជាក់លាក់ ដើម្បីឱ្យទម្រង់ Checklist ទាំងអស់ (១៦-៣២ កាមេរ៉ា + ម៉ាស៊ីនថត + ហត្ថលេខាទាំង ៥) សមល្មមក្នុងទំព័រតែមួយ
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={modalFitToOnePage}
+                    onChange={e => setModalFitToOnePage(e.target.checked)}
+                    className="w-5 h-5 accent-amber-500 rounded cursor-pointer shrink-0"
+                  />
+                </label>
+
+                <label className="p-3 bg-slate-950/80 border border-slate-800 hover:border-slate-700 rounded-xl flex items-center justify-between cursor-pointer">
+                  <div className="pr-2">
+                    <p className="text-xs font-bold text-slate-200">
+                      🖼️ បោះពុម្ពរូបថតអេក្រង់ពេល Print / PDF (Include Screenshots in Print)
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      បើបើក៖ រូបថត Live View ពេលថ្ងៃ និងពេលយប់ នឹងត្រូវបោះពុម្ពនៅទំព័រទី ២ (Page 2) ដោយមិនធ្វើឱ្យប៉ះពាល់ទំព័រ Checklist ទី ១ ឡើយ
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={modalIncludeScreenshots}
+                    onChange={e => setModalIncludeScreenshots(e.target.checked)}
+                    className="w-5 h-5 accent-amber-500 rounded cursor-pointer shrink-0"
+                  />
+                </label>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsEditHeaderModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  បោះបង់
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-amber-600/30 cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>រក្សាទុក (Save Settings)</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -2408,6 +2789,9 @@ interface ZoneReportSheetProps {
   nightScreenshot: string | null;
   pageNumber?: number;
   isMultiPagePacket?: boolean;
+  headerConfig?: ChecklistHeaderConfig;
+  onOpenHeaderModal?: () => void;
+  onUpdateYear?: (newYear: number | string) => void;
   onToggleCheck?: (camNum: number, shift: 'day' | 'night') => void;
   onEditCamera?: (index: number) => void;
   onUpdateDvrCheck?: (partial: Partial<DVRCheckStatus>) => void;
@@ -2423,12 +2807,23 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
   nightScreenshot,
   pageNumber,
   isMultiPagePacket,
+  headerConfig,
+  onOpenHeaderModal,
+  onUpdateYear,
   onToggleCheck,
   onEditCamera,
   onUpdateDvrCheck,
   onOpenDvrCheckModal,
   onUpdateSymptom,
 }) => {
+  const isFitOnePage = headerConfig?.fitToOnePage !== false;
+  const shouldIncludeScreenshots = headerConfig?.includeScreenshotsInPrint === true;
+  const currentYear = headerConfig?.year || 2026;
+  const companyName = headerConfig?.companyName || 'TK Garment';
+  const companySubName = headerConfig?.companySubName || 'Sisophon Co., Ltd.';
+  const formCode = headerConfig?.formCode || 'F-IT-002 REW.00 Date 22/03/2024';
+  const logoUrl = headerConfig?.logoUrl;
+
   const workingCount = cameras.filter(c => c.dayStatus === 'ok' && c.nightStatus === 'ok').length;
   const faultyCount = cameras.filter(c => c.dayStatus === 'issue' || c.nightStatus === 'issue').length;
   const faultyListStr =
@@ -2458,35 +2853,93 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
   ];
 
   return (
-    <div className="bg-white text-slate-950 rounded-2xl shadow-xl overflow-hidden print:p-0 print:m-0 print:border-none print-page border border-slate-300">
-      <div className="p-6 sm:p-8 space-y-4 text-xs font-battambang">
-        {/* Header (TK Garment Sisophon Co., Ltd.) */}
-        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-3">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-12 h-12 rounded border-2 border-amber-600 bg-white text-amber-600 font-extrabold text-xl font-serif">
-              TK
-            </div>
+    <div
+      className={`bg-white text-slate-950 rounded-2xl shadow-xl overflow-hidden print:p-0 print:m-0 print:border-none print-page border border-slate-300 ${
+        isFitOnePage ? 'checklist-1page-fit' : ''
+      }`}
+    >
+      <div
+        className={`${
+          isFitOnePage
+            ? 'p-3 sm:p-5 space-y-2.5 print:p-0 print:space-y-1.5'
+            : 'p-6 sm:p-8 space-y-4'
+        } text-xs font-battambang`}
+      >
+        {/* Header (Company Logo, Name, Year & Form Code) */}
+        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-2.5">
+          <div
+            className={`flex items-center gap-3 ${onOpenHeaderModal ? 'cursor-pointer group' : ''}`}
+            onClick={onOpenHeaderModal}
+            title={onOpenHeaderModal ? 'ចុចដើម្បីប្តូរ Logo និងឈ្មោះក្រុមហ៊ុន / Click to change Logo' : undefined}
+          >
+            {logoUrl ? (
+              <div className="relative">
+                <img
+                  src={logoUrl}
+                  alt={companyName}
+                  className="max-h-12 max-w-[130px] object-contain rounded"
+                />
+                {onOpenHeaderModal && (
+                  <span className="no-print absolute -bottom-1 -right-1 bg-amber-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition shadow-xs">
+                    <Edit2 className="w-2.5 h-2.5" />
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="relative flex items-center justify-center w-12 h-12 rounded border-2 border-amber-600 bg-white text-amber-600 font-extrabold text-xl font-serif">
+                TK
+                {onOpenHeaderModal && (
+                  <span className="no-print absolute -bottom-1 -right-1 bg-amber-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition shadow-xs">
+                    <Edit2 className="w-2.5 h-2.5" />
+                  </span>
+                )}
+              </div>
+            )}
             <div>
-              <h1 className="font-extrabold text-base tracking-tight text-amber-700 leading-none">
-                TK Garment
-              </h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="font-extrabold text-base tracking-tight text-amber-700 leading-none">
+                  {companyName}
+                </h1>
+                {onOpenHeaderModal && (
+                  <span className="no-print opacity-0 group-hover:opacity-100 text-slate-400 hover:text-amber-600 transition text-[10px]">
+                    <Edit2 className="w-3 h-3" />
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] font-bold text-slate-700">
-                Sisophon Co., Ltd.
+                {companySubName}
               </p>
             </div>
           </div>
 
-          <div className="text-center flex-1 px-4">
-            <h2 className="font-extrabold text-sm sm:text-base text-slate-900">
-              ទម្រង់ត្រួតពិនិត្យ CCTV និង DVR សម្រាប់ឆ្នាំ 2026
-            </h2>
+          <div
+            className={`text-center flex-1 px-4 ${onOpenHeaderModal ? 'cursor-pointer group' : ''}`}
+            onClick={onOpenHeaderModal}
+            title={onOpenHeaderModal ? 'ចុចដើម្បីប្តូរឆ្នាំ / Click to change Year' : undefined}
+          >
+            <div className="inline-flex items-center gap-1.5">
+              <h2 className="font-extrabold text-sm sm:text-base text-slate-900 leading-tight">
+                ទម្រង់ត្រួតពិនិត្យ CCTV និង DVR សម្រាប់ឆ្នាំ {currentYear}
+              </h2>
+              {onOpenHeaderModal && (
+                <span className="no-print opacity-0 group-hover:opacity-100 text-slate-400 hover:text-sky-600 transition">
+                  <Edit2 className="w-3 h-3" />
+                </span>
+              )}
+            </div>
             <h3 className="text-xs font-semibold text-slate-700">
-              แบบฟอร์มตรวจสอบกล้องวงจรปิด และเครื่องบันทึกภาพ ประจำปี 2026
+              แบบฟอร์มตรวจสอบกล้องวงจรปิด และเครื่องบันทึกภาพ ประจำปี {currentYear}
             </h3>
           </div>
 
-          <div className="text-right text-[10px] font-mono border border-slate-400 p-1 rounded bg-slate-50">
-            <p className="font-bold text-slate-800">F-IT-002 REW.00 Date 22/03/2024</p>
+          <div
+            className={`text-right text-[10px] font-mono border border-slate-400 p-1 rounded bg-slate-50 ${
+              onOpenHeaderModal ? 'cursor-pointer hover:border-amber-500 transition group' : ''
+            }`}
+            onClick={onOpenHeaderModal}
+            title={onOpenHeaderModal ? 'ចុចដើម្បីកែប្រែ Form Code' : undefined}
+          >
+            <p className="font-bold text-slate-800">{formCode}</p>
             {pageNumber && <p className="text-slate-600 mt-0.5">Page {pageNumber}</p>}
           </div>
         </div>
@@ -2501,7 +2954,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
 
         {/* Checklist Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse border border-slate-400 text-[11px]">
+          <table className="w-full text-left border-collapse border border-slate-400 text-[11px] checklist-table">
             <thead>
               <tr className="bg-slate-100 text-slate-800 text-center font-bold border-b border-slate-400">
                 <th className="border border-slate-400 py-1 px-1 w-10">
@@ -2630,7 +3083,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
         </div>
 
         {/* Summary Block */}
-        <div className="border border-slate-400 p-2.5 bg-slate-50 space-y-1.5 text-[11px]">
+        <div className="border border-slate-400 p-2.5 bg-slate-50 space-y-1.5 text-[11px] summary-block">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-300 pb-1.5">
             <div className="flex items-center gap-4">
               <span className="text-slate-700 font-semibold">หมายเหตุ:</span>
@@ -2766,7 +3219,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
         </div>
 
         {/* DVR Status Block (Interactive & Editable) */}
-        <div className="border border-slate-400 text-[11px] rounded overflow-hidden">
+        <div className="border border-slate-400 text-[11px] rounded overflow-hidden dvr-status-grid">
           <div className="bg-slate-100 font-bold p-1.5 border-b border-slate-400 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-slate-900 font-bold">เครื่องบันทึกภาพ (DVR/NVR Recorder Status)</span>
@@ -3054,7 +3507,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
         </div>
 
         {/* Signatures Row - NO AUTO FILL SIGN NAMES */}
-        <div className="pt-4 grid grid-cols-5 gap-3 text-center text-[10px] border-t border-slate-300 break-inside-avoid">
+        <div className="pt-4 grid grid-cols-5 gap-3 text-center text-[10px] border-t border-slate-300 break-inside-avoid signatures-row">
           <div className="space-y-4">
             <div className="h-8 flex items-end justify-center font-serif text-slate-700 italic"></div>
             <div className="border-t border-dotted border-slate-400 pt-1">
@@ -3088,7 +3541,11 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
         </div>
 
         {/* ATTACHED EVIDENCE SECTION (Matches user requirement: Attached Day & Night Screenshots!) */}
-        <div className="pt-6 border-t-2 border-dashed border-slate-400 break-inside-avoid space-y-4">
+        <div
+          className={`pt-6 border-t-2 border-dashed border-slate-400 break-inside-avoid space-y-4 ${
+            !shouldIncludeScreenshots ? 'no-print' : 'break-before-page print:pt-4'
+          }`}
+        >
           <div className="flex items-center justify-between pb-1">
             <div className="flex items-center gap-2">
               <Paperclip className="w-4 h-4 text-slate-700" />
@@ -3096,9 +3553,14 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
                 + {dvr.name} (Attached CCTV Screenshots Evidence)
               </h4>
             </div>
-            <span className="text-[10px] text-slate-500 font-mono">
-              Date: {inspectionDate} • {dvr.channelCount} Channels
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="no-print text-[10px] px-2 py-0.5 rounded font-medium border border-slate-300 bg-slate-100 text-slate-700">
+                {shouldIncludeScreenshots ? '📄 Print: Page 2 (ភ្ជាប់រូបថត)' : '🚫 Print: Hidden (Checklist 1-Page Only)'}
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                Date: {inspectionDate} • {dvr.channelCount} Channels
+              </span>
+            </div>
           </div>
 
           <div className="space-y-4">

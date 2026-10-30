@@ -1,4 +1,4 @@
-import { LocationZone, Camera, InspectionRecord, IssueTicket, Language, WeeklyDVRAttachment } from '../types';
+import { LocationZone, Camera, InspectionRecord, IssueTicket, Language, WeeklyDVRAttachment, ChecklistHeaderConfig } from '../types';
 import { initialLocations, initialCameras, initialIssueTickets, generateInitialInspections } from '../data/initialData';
 import { initialDVRProfiles } from '../data/smartReportTemplate';
 import { idbSet, idbGet } from './idbStorage';
@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   INSPECTIONS: 'cctv_sentinel_inspections_v1',
   TICKETS: 'cctv_sentinel_tickets_v1',
   LANGUAGE: 'cctv_sentinel_language_v1',
+  CHECKLIST_CONFIG: 'cctv_sentinel_checklist_config_v1',
 };
 
 export const getStoredLanguage = (): Language => {
@@ -355,4 +356,56 @@ export const resetAllToDefault = () => {
     inspections: defaultInspections,
     tickets: initialIssueTickets,
   };
+};
+
+export const defaultChecklistHeaderConfig: ChecklistHeaderConfig = {
+  logoUrl: '',
+  companyName: 'TK Garment',
+  companySubName: 'Sisophon Co., Ltd.',
+  year: 2026,
+  formCode: 'F-IT-002 REW.00 Date 22/03/2024',
+  fitToOnePage: true,
+  includeScreenshotsInPrint: false,
+};
+
+export const getStoredChecklistHeaderConfig = (): ChecklistHeaderConfig => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CHECKLIST_CONFIG);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { ...defaultChecklistHeaderConfig, ...parsed };
+    }
+  } catch (e) {
+    console.error('Failed to get stored checklist config', e);
+  }
+  return defaultChecklistHeaderConfig;
+};
+
+export const setStoredChecklistHeaderConfig = (cfg: ChecklistHeaderConfig) => {
+  try {
+    // If logoUrl is large base64, save to IDB and keep clean reference in localStorage
+    if (cfg.logoUrl && cfg.logoUrl.length > 500) {
+      idbSet('checklist_logo_custom', cfg.logoUrl);
+      const light = { ...cfg, logoUrl: '__IDB__' };
+      localStorage.setItem(STORAGE_KEYS.CHECKLIST_CONFIG, JSON.stringify(light));
+    } else {
+      localStorage.setItem(STORAGE_KEYS.CHECKLIST_CONFIG, JSON.stringify(cfg));
+    }
+  } catch (e) {
+    console.error('Failed to set stored checklist config', e);
+  }
+};
+
+export const hydrateChecklistLogoWithIDB = async (cfg: ChecklistHeaderConfig): Promise<ChecklistHeaderConfig> => {
+  if (cfg.logoUrl === '__IDB__') {
+    try {
+      const fromDb = await idbGet('checklist_logo_custom');
+      if (fromDb) {
+        return { ...cfg, logoUrl: fromDb };
+      }
+    } catch (e) {
+      console.warn('Could not load custom logo from IDB', e);
+    }
+  }
+  return cfg;
 };

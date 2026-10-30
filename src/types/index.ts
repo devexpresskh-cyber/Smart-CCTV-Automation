@@ -192,3 +192,13 @@ export interface WeeklyDVRAttachment {
   faultyChannels?: string;
   remarks?: string;
 }
+
+export interface ChecklistHeaderConfig {
+  logoUrl?: string;
+  companyName: string;
+  companySubName: string;
+  year: number | string;
+  formCode: string;
+  fitToOnePage?: boolean;
+  includeScreenshotsInPrint?: boolean;
+}

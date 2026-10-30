@@ -146,6 +146,11 @@ input, textarea, button, select, table, th, td {
 
 /* Print specific styles for PDF and Official Weekly Reports */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 5mm 5mm 5mm 5mm;
+  }
+
   html, body, * {
     font-family: 'Khmer OS Battambang', 'Battambang', sans-serif !important;
   }
@@ -153,7 +158,7 @@ input, textarea, button, select, table, th, td {
   body {
     background-color: #ffffff !important;
     color: #000000 !important;
-    font-size: 11pt !important;
+    font-size: 10pt !important;
   }
 
   .no-print {
@@ -174,6 +179,55 @@ input, textarea, button, select, table, th, td {
 
   .break-inside-avoid {
     break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .break-before-page {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .break-after-page {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  /* Compact 1-Page Checklist Rules when fitToOnePage is enabled */
+  .checklist-1page-fit {
+    padding: 2mm 3mm !important;
+    margin: 0 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .checklist-1page-fit .checklist-table th,
+  .checklist-1page-fit .checklist-table td {
+    padding-top: 1px !important;
+    padding-bottom: 1px !important;
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+    font-size: 9px !important;
+    line-height: 1.15 !important;
+  }
+
+  .checklist-1page-fit .dvr-status-grid {
+    padding-top: 1px !important;
+    padding-bottom: 1px !important;
+    font-size: 8.5px !important;
+    line-height: 1.1 !important;
+  }
+
+  .checklist-1page-fit .summary-block {
+    padding: 2px 4px !important;
+    font-size: 9px !important;
+    line-height: 1.15 !important;
+  }
+
+  .checklist-1page-fit .signatures-row {
+    padding-top: 4px !important;
+    font-size: 8.5px !important;
   }
 }
 
