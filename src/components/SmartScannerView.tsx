@@ -109,9 +109,41 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   const [dayScreenshot, setDayScreenshot] = useState<string | null>(activeDvr.dayScreenshotUrl || null);
   const [nightScreenshot, setNightScreenshot] = useState<string | null>(activeDvr.nightScreenshotUrl || null);
 
-  // Dates & metadata
-  const [selectedWeek, setSelectedWeek] = useState<string>('Week 42 (12-18 Oct 2026)');
-  const [inspectionDate, setInspectionDate] = useState<string>('18/10/2026');
+  // Helper to format Date as DD/MM/YYYY
+  const getTodayFormatted = () => {
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  };
+
+  // Helper to get week label for current date
+  const getTodayWeekLabel = () => {
+    const now = new Date();
+    const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+    
+    // Monday of this week
+    const monday = new Date(now);
+    const diffToMonday = (now.getDay() === 0 ? -6 : 1) - now.getDay();
+    monday.setDate(now.getDate() + diffToMonday);
+    
+    // Sunday of this week
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    
+    const monStr = monday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const sunStr = sunday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    return `Week ${weekNo} (${monStr} - ${sunStr})`;
+  };
+
+  // Dates & metadata - Auto synced to today's date
+  const [selectedWeek, setSelectedWeek] = useState<string>(getTodayWeekLabel);
+  const [inspectionDate, setInspectionDate] = useState<string>(getTodayFormatted);
   const [isAnalyzingDay, setIsAnalyzingDay] = useState(false);
   const [isAnalyzingNight, setIsAnalyzingNight] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
@@ -1186,8 +1218,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 onChange={e => setSelectedWeek(e.target.value)}
                 className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-semibold focus:outline-none focus:border-sky-500"
               >
-                <option value="Week 42 (12-18 Oct 2026)">Week 42 (12-18 Oct 2026) [សប្តាហ៍បច្ចុប្បន្ន]</option>
-                <option value="Week 41 (05-11 Oct 2026)">Week 41 (05-11 Oct 2026) [សប្តាហ៍មុន]</option>
+                <option value={selectedWeek}>{selectedWeek} [សប្តាហ៍បច្ចុប្បន្ន]</option>
+                <option value="Week 42 (12-18 Oct 2026)">Week 42 (12-18 Oct 2026)</option>
+                <option value="Week 41 (05-11 Oct 2026)">Week 41 (05-11 Oct 2026)</option>
                 <option value="Week 43 (19-25 Oct 2026)">Week 43 (19-25 Oct 2026)</option>
               </select>
             </div>
@@ -1241,14 +1274,63 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
               <span>{lang === 'km' ? 'ភ្ជាប់រូបពេល Print (P2)' : 'Screenshots in Print'}</span>
             </button>
 
-            <div className="flex items-center gap-2 text-[11px] text-slate-400">
-              <span>កាលបរិច្ឆេទត្រួតពិនិត្យ:</span>
-              <input
-                type="text"
-                value={inspectionDate}
-                onChange={e => setInspectionDate(e.target.value)}
-                className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono text-white w-28 text-center"
-              />
+            {/* Auto Synced Inspection Date with Quick Today Button */}
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span className="font-semibold text-slate-300">កាលបរិច្ឆេទត្រួតពិនិត្យ:</span>
+              <div className="relative flex items-center">
+                <input
+                  type="text"
+                  value={inspectionDate}
+                  onChange={e => setInspectionDate(e.target.value)}
+                  placeholder="DD/MM/YYYY"
+                  className="bg-slate-950 border border-slate-700 hover:border-sky-500 rounded px-2 py-0.5 text-xs font-mono text-white w-28 text-center focus:outline-none focus:border-sky-500 transition"
+                  title="កាលបរិច្ឆេទត្រួតពិនិត្យ (DD/MM/YYYY) - ធ្វើសមកាលកម្មស្វ័យប្រវត្តិនឹងថ្ងៃនេះ"
+                />
+                <input
+                  type="date"
+                  aria-label="ជ្រើសរើសកាលបរិច្ឆេទតាម Calendar"
+                  value={(() => {
+                    const parts = inspectionDate.split('/');
+                    if (parts.length === 3) {
+                      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                    }
+                    return '';
+                  })()}
+                  onChange={e => {
+                    if (e.target.value) {
+                      const [y, m, d] = e.target.value.split('-');
+                      setInspectionDate(`${d}/${m}/${y}`);
+                      // Also update year in headerConfig if year differs
+                      if (y && String(headerConfig.year) !== y) {
+                        handleQuickChangeYear(parseInt(y, 10));
+                      }
+                    }
+                  }}
+                  className="opacity-0 absolute inset-0 w-full h-full cursor-pointer z-10 pointer-events-auto"
+                  tabIndex={-1}
+                />
+              </div>
+
+              {/* Quick Today Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const todayFormatted = getTodayFormatted();
+                  const todayWeek = getTodayWeekLabel();
+                  const currentYr = new Date().getFullYear();
+                  setInspectionDate(todayFormatted);
+                  setSelectedWeek(todayWeek);
+                  if (String(headerConfig.year) !== String(currentYr)) {
+                    handleQuickChangeYear(currentYr);
+                  }
+                  showFeedback(lang === 'km' ? `✓ បានធ្វើសមកាលកម្មថ្ងៃនេះ ${todayFormatted}` : `✓ Synced to today: ${todayFormatted}`);
+                }}
+                className="px-2 py-0.5 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/50 hover:border-sky-400 rounded text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                title="ធ្វើសមកាលកម្មកាលបរិច្ឆេទមកថ្ងៃនេះ (Sync to Today)"
+              >
+                <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                <span>ថ្ងៃនេះ (Today)</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1902,6 +1984,10 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             headerConfig={headerConfig}
             onOpenHeaderModal={handleOpenHeaderModal}
             onUpdateYear={handleQuickChangeYear}
+            onUpdateInspectionDate={date => {
+              setInspectionDate(date);
+              showFeedback(lang === 'km' ? `✓ បានកែប្រែកាលបរិច្ឆេទទៅជា ${date}` : `✓ Inspection date set to ${date}`);
+            }}
             onToggleCheck={handleToggleCheck}
             onEditCamera={idx => {
               setEditingDvrId(activeDvr.id);
@@ -1950,6 +2036,10 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                   headerConfig={headerConfig}
                   onOpenHeaderModal={handleOpenHeaderModal}
                   onUpdateYear={handleQuickChangeYear}
+                  onUpdateInspectionDate={date => {
+                    setInspectionDate(date);
+                    showFeedback(lang === 'km' ? `✓ បានកែប្រែកាលបរិច្ឆេទទៅជា ${date}` : `✓ Inspection date set to ${date}`);
+                  }}
                   onToggleCheck={(camNum, shift) => handlePacketToggleCheck(dvr.id, camNum, shift)}
                   onEditCamera={camIdx => {
                     setEditingDvrId(dvr.id);
@@ -2792,6 +2882,7 @@ interface ZoneReportSheetProps {
   headerConfig?: ChecklistHeaderConfig;
   onOpenHeaderModal?: () => void;
   onUpdateYear?: (newYear: number | string) => void;
+  onUpdateInspectionDate?: (newDate: string) => void;
   onToggleCheck?: (camNum: number, shift: 'day' | 'night') => void;
   onEditCamera?: (index: number) => void;
   onUpdateDvrCheck?: (partial: Partial<DVRCheckStatus>) => void;
@@ -2810,6 +2901,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
   headerConfig,
   onOpenHeaderModal,
   onUpdateYear,
+  onUpdateInspectionDate,
   onToggleCheck,
   onEditCamera,
   onUpdateDvrCheck,
@@ -3499,10 +3591,54 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
         </div>
 
         {/* Date Row */}
-        <div className="text-[11px]">
-          <span className="font-semibold text-slate-800">ตรวจสอบ วันที่:</span>{' '}
-          <span className="font-mono font-bold text-slate-900 border-b border-dashed border-slate-700 px-3">
-            {inspectionDate}
+        <div className="text-[11px] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-800">ตรวจสอบ วันที่ (កាលបរិច្ឆេទត្រួតពិនិត្យ):</span>{' '}
+            <div className="relative inline-flex items-center">
+              <span className="font-mono font-bold text-slate-900 border-b border-dashed border-slate-700 px-3 py-0.5 bg-slate-50 rounded">
+                {inspectionDate}
+              </span>
+              {onUpdateInspectionDate && (
+                <input
+                  type="date"
+                  aria-label="ជ្រើសរើសកាលបរិច្ឆេទត្រួតពិនិត្យ"
+                  value={(() => {
+                    const parts = inspectionDate.split('/');
+                    if (parts.length === 3) {
+                      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                    }
+                    return '';
+                  })()}
+                  onChange={e => {
+                    if (e.target.value) {
+                      const [y, m, d] = e.target.value.split('-');
+                      onUpdateInspectionDate(`${d}/${m}/${y}`);
+                    }
+                  }}
+                  className="opacity-0 absolute inset-0 w-full h-full cursor-pointer no-print z-10"
+                  title="ចុចដើម្បីជ្រើសរើសកាលបរិច្ឆេទ / Click to change date"
+                />
+              )}
+            </div>
+            {onUpdateInspectionDate && (
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const dd = String(now.getDate()).padStart(2, '0');
+                  const mm = String(now.getMonth() + 1).padStart(2, '0');
+                  const yyyy = now.getFullYear();
+                  onUpdateInspectionDate(`${dd}/${mm}/${yyyy}`);
+                }}
+                className="no-print text-[10px] px-2 py-0.5 rounded bg-sky-100 hover:bg-sky-200 text-sky-800 border border-sky-300 font-semibold transition cursor-pointer flex items-center gap-1"
+                title="ធ្វើសមកាលកម្មកាលបរិច្ឆេទមកថ្ងៃនេះ / Auto sync to today"
+              >
+                <span>⚡ ថ្ងៃនេះ (Today)</span>
+              </button>
+            )}
+          </div>
+          <span className="no-print text-[10px] text-slate-500 font-normal">
+            Auto Synced with Today Date
           </span>
         </div>
 

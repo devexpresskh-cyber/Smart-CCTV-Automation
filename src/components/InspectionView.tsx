@@ -456,9 +456,19 @@ export const InspectionView: React.FC<InspectionViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Date */}
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                  {t.selectDate}
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-slate-300">
+                    {t.selectDate}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+                    className="text-[10px] text-sky-400 hover:text-sky-300 font-semibold flex items-center gap-0.5 cursor-pointer"
+                    title="កំណត់កាលបរិច្ឆេទថ្ងៃនេះ (Set Today)"
+                  >
+                    <span>⚡ ថ្ងៃនេះ</span>
+                  </button>
+                </div>
                 <input
                   type="date"
                   value={date}
