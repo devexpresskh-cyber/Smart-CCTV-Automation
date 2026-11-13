@@ -172,6 +172,8 @@ input, textarea, button, select, table, th, td {
   .print-page {
     box-shadow: none !important;
     border: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
@@ -196,8 +198,10 @@ input, textarea, button, select, table, th, td {
   .checklist-1page-fit {
     padding: 2mm 3mm !important;
     margin: 0 !important;
-    page-break-after: avoid !important;
-    break-after: avoid !important;
+    overflow: visible !important;
+  }
+
+  .checklist-1page-fit .checklist-main-section {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }

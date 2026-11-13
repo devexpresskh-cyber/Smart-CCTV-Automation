@@ -74,6 +74,7 @@ interface SmartScannerViewProps {
   onSyncWithSystem?: (report: SmartInspectionReport) => void;
   onNavigateToWeeklyReport?: () => void;
   targetDvrId?: string;
+  printAllTrigger?: number;
   onOpenHealthModal?: () => void;
 }
 
@@ -82,6 +83,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
   onSyncWithSystem,
   onNavigateToWeeklyReport,
   targetDvrId,
+  printAllTrigger,
   onOpenHealthModal,
 }) => {
   const t = translations[lang];
@@ -98,6 +100,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
   // Mode: Single Zone Inspector vs Full Multi-DVR Weekly Packet
   const [viewMode, setViewMode] = useState<'single' | 'packet'>('single');
+  const [selectedPrintDvrIds, setSelectedPrintDvrIds] = useState<string[]>(() => dvrProfiles.map(d => d.id));
+  const [pendingPrintAll, setPendingPrintAll] = useState(false);
+  const sampleMonitorCacheRef = useRef<Record<string, string>>({});
 
   // Channel count & grid for active DVR
   const [channelCount, setChannelCount] = useState<number>(activeDvr.channelCount);
@@ -164,6 +169,47 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
       setActiveDvrId(targetDvrId);
     }
   }, [targetDvrId]);
+
+  // Keep selectedPrintDvrIds synchronized when new DVRs are added or deleted
+  useEffect(() => {
+    setSelectedPrintDvrIds(prev => {
+      const existingIds = new Set(dvrProfiles.map(d => d.id));
+      const kept = prev.filter(id => existingIds.has(id));
+      const newOnes = dvrProfiles.filter(d => !prev.includes(d.id)).map(d => d.id);
+      if (kept.length === 0 && newOnes.length === 0) return dvrProfiles.map(d => d.id);
+      return [...kept, ...newOnes];
+    });
+  }, [dvrProfiles.length]);
+
+  // Trigger Print All CCTV DVR from external tab (e.g. Weekly Report)
+  useEffect(() => {
+    if (printAllTrigger && printAllTrigger > 0) {
+      setSelectedPrintDvrIds(dvrProfiles.map(d => d.id));
+      setViewMode('packet');
+      setPendingPrintAll(true);
+    }
+  }, [printAllTrigger]);
+
+  // Wait until Packet View renders all DVR sheets in DOM before invoking window.print()
+  useEffect(() => {
+    if (pendingPrintAll && viewMode === 'packet') {
+      const timer = setTimeout(() => {
+        setPendingPrintAll(false);
+        window.print();
+      }, 280);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingPrintAll, viewMode]);
+
+  const handlePrintAllCCTV = () => {
+    if (selectedPrintDvrIds.length === 0) {
+      setSelectedPrintDvrIds(dvrProfiles.map(d => d.id));
+    }
+    if (viewMode !== 'packet') {
+      setViewMode('packet');
+    }
+    setPendingPrintAll(true);
+  };
 
   // Compute fleet health and alerts
   const fleetHealth = calculateFleetHealth(dvrProfiles);
@@ -455,8 +501,12 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     }
   }, [activeDvrId, dvrProfiles]);
 
-  // High-fidelity SMART PSS Monitor Simulation for Day or Night (compact ~25KB JPEG)
+  // High-fidelity SMART PSS Monitor Simulation for Day or Night (memoized compact ~25KB JPEG)
   function generateSampleMonitor(chCount: number, dvrName: string, shift: 'day' | 'night'): string {
+    const cacheKey = `${chCount}__${dvrName}__${shift}`;
+    if (sampleMonitorCacheRef.current[cacheKey]) {
+      return sampleMonitorCacheRef.current[cacheKey];
+    }
     const canvas = document.createElement('canvas');
     canvas.width = 800;
     canvas.height = 450;
@@ -585,7 +635,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
       ctx.strokeRect(x, y, cellW, cellH);
     }
 
-    return canvas.toDataURL('image/jpeg', 0.65);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+    sampleMonitorCacheRef.current[cacheKey] = dataUrl;
+    return dataUrl;
   }
 
   // Vision analyzer that inspects image and automatically checks Day or Night boxes
@@ -1194,15 +1246,29 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
               }`}
             >
               <BookOpen className="w-4 h-4" />
-              <span>{viewMode === 'packet' ? 'មើលម្តងមួយ DVR' : 'មើលកញ្ចប់គ្រប់ DVR'}</span>
+              <span>{viewMode === 'packet' ? 'មើលម្តងមួយ DVR' : `មើលកញ្ចប់គ្រប់ DVR (${dvrProfiles.length})`}</span>
             </button>
 
             <button
               onClick={() => window.print()}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
+              className="flex items-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
+              title={viewMode === 'packet' ? 'បោះពុម្ព DVR ដែលបានជ្រើសរើស' : 'បោះពុម្ព DVR បច្ចុប្បន្ន'}
             >
               <Printer className="w-4 h-4" />
-              <span>បោះពុម្ព / PDF</span>
+              <span>{viewMode === 'packet' ? 'បោះពុម្ព / PDF' : 'បោះពុម្ព DVR នេះ'}</span>
+            </button>
+
+            <button
+              onClick={handlePrintAllCCTV}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-extrabold transition shadow-md shadow-emerald-600/25 cursor-pointer"
+              title="បោះពុម្ពទម្រង់ Checklist គ្រប់ CCTV DVR ទាំងអស់ក្នុងពេលតែមួយ / Print All CCTV DVR"
+            >
+              <Printer className="w-4 h-4" />
+              <span>
+                {lang === 'km'
+                  ? `🖨️ បោះពុម្ពគ្រប់ CCTV DVR (${dvrProfiles.length})`
+                  : `🖨️ Print All CCTV DVR (${dvrProfiles.length})`}
+              </span>
             </button>
           </div>
         </div>
@@ -2001,59 +2067,155 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
           />
         </div>
       ) : (
-        /* Multi-Zone Packet View: Renders all DVRs sequentially for complete booklet printing! */
-        <div className="space-y-10">
-          <div className="no-print p-4 rounded-xl bg-sky-950/60 border border-sky-800 text-sky-200 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-sky-400 shrink-0" />
-              <span>
-                កំពុងបង្ហាញកញ្ចប់របាយការណ៍ពេញលេញគ្រប់ <strong>{dvrProfiles.length} DVRs</strong> រួមទាំងរូបថតភ្ជាប់ពេលថ្ងៃ និងពេលយប់។ ចុច <strong>"បោះពុម្ព / Save PDF"</strong> ដើម្បីទាញយកជាឯកសារ PDF ពេញលេញ។
-              </span>
-            </div>
-
-            <button
-              onClick={() => window.print()}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shrink-0"
-            >
-              Print All Pages
-            </button>
-          </div>
-
-          {dvrProfiles.map((dvr, idx) => {
-            const dayImg = dvr.dayScreenshotUrl || generateSampleMonitor(dvr.channelCount, dvr.name, 'day');
-            const nightImg = dvr.nightScreenshotUrl || generateSampleMonitor(dvr.channelCount, dvr.name, 'night');
+        /* Multi-Zone Packet View: Renders all selected DVRs sequentially for complete booklet printing! */
+        <div className="space-y-8 print:space-y-0">
+          {(() => {
+            const printDvrs = dvrProfiles.filter(d => selectedPrintDvrIds.includes(d.id));
+            const totalEstPages = printDvrs.length * (headerConfig.includeScreenshotsInPrint ? 2 : 1);
 
             return (
-              <div key={dvr.id} className="break-after-page">
-                <ZoneReportSheet
-                  dvr={dvr}
-                  cameras={dvr.cameras}
-                  inspectionDate={inspectionDate}
-                  dayScreenshot={dayImg}
-                  nightScreenshot={nightImg}
-                  pageNumber={idx + 1}
-                  isMultiPagePacket
-                  headerConfig={headerConfig}
-                  onOpenHeaderModal={handleOpenHeaderModal}
-                  onUpdateYear={handleQuickChangeYear}
-                  onUpdateInspectionDate={date => {
-                    setInspectionDate(date);
-                    showFeedback(lang === 'km' ? `✓ បានកែប្រែកាលបរិច្ឆេទទៅជា ${date}` : `✓ Inspection date set to ${date}`);
-                  }}
-                  onToggleCheck={(camNum, shift) => handlePacketToggleCheck(dvr.id, camNum, shift)}
-                  onEditCamera={camIdx => {
-                    setEditingDvrId(dvr.id);
-                    setEditingCameraIndex(camIdx);
-                    setEditCamNameThai(dvr.cameras[camIdx].nameThai);
-                    setEditCamNameKm(dvr.cameras[camIdx].nameKm);
-                  }}
-                  onUpdateDvrCheck={partial => handleUpdateDvrCheck(dvr.id, partial)}
-                  onOpenDvrCheckModal={() => handleOpenDvrStatusModal(dvr.id)}
-                  onUpdateSymptom={symptom => handleUpdateSymptom(dvr.id, symptom)}
-                />
-              </div>
+              <>
+                <div className="no-print p-4 rounded-2xl bg-slate-900 border border-sky-700/60 text-sky-100 space-y-3 shadow-lg">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 text-xs">
+                      <div className="p-2 rounded-xl bg-sky-500/20 text-sky-400 shrink-0">
+                        <BookOpen className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-white">
+                          កញ្ចប់បោះពុម្ពគ្រប់ CCTV DVR ទាំងអស់ (All CCTV DVR Print Packet)
+                        </p>
+                        <p className="text-[11px] text-slate-300">
+                          បានជ្រើសរើស <strong className="text-emerald-300">{printDvrs.length} / {dvrProfiles.length} DVRs</strong> • ចំនួនទំព័រប៉ាន់ស្មាន៖{' '}
+                          <strong className="text-amber-300">{totalEstPages} ទំព័រ A4</strong>{' '}
+                          ({headerConfig.includeScreenshotsInPrint ? 'Check-list ១ ទំព័រ + រូបថត ១ ទំព័រ / DVR' : 'Check-list ១ ទំព័រ / DVR'})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPrintDvrIds(dvrProfiles.map(d => d.id))}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                      >
+                        ✓ ជ្រើសរើសទាំងអស់ ({dvrProfiles.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const faultyIds = dvrProfiles
+                            .filter(d => d.cameras.some(c => c.dayStatus === 'issue' || c.nightStatus === 'issue'))
+                            .map(d => d.id);
+                          setSelectedPrintDvrIds(faultyIds);
+                        }}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                      >
+                        ⚠ តែ DVR មានបញ្ហា
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPrintDvrIds([])}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                      >
+                        សម្អាត
+                      </button>
+                      <button
+                        type="button"
+                        disabled={printDvrs.length === 0}
+                        onClick={() => window.print()}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-md shadow-emerald-600/30 transition cursor-pointer"
+                      >
+                        <Printer className="w-4 h-4" />
+                        <span>
+                          {lang === 'km'
+                            ? `🖨️ បោះពុម្ពឥឡូវនេះ (${printDvrs.length} DVRs)`
+                            : `🖨️ Print All Selected (${printDvrs.length} DVRs)`}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Select/Deselect individual DVRs */}
+                  <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-800">
+                    {dvrProfiles.map((d, idx) => {
+                      const isSelected = selectedPrintDvrIds.includes(d.id);
+                      const hasFault = d.cameras.some(c => c.dayStatus === 'issue' || c.nightStatus === 'issue');
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() =>
+                            setSelectedPrintDvrIds(prev =>
+                              prev.includes(d.id) ? prev.filter(x => x !== d.id) : [...prev, d.id]
+                            )
+                          }
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition flex items-center gap-1.5 cursor-pointer ${
+                            isSelected
+                              ? 'bg-sky-600/30 border-sky-500 text-white'
+                              : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          <span className="font-mono text-xs">{isSelected ? '☑' : '☐'}</span>
+                          <span>
+                            {idx + 1}. {d.name}
+                          </span>
+                          <span className="text-[10px] font-mono opacity-75">({d.channelCount}CH)</span>
+                          {hasFault && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title="Has camera issues" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {printDvrs.length === 0 ? (
+                  <div className="no-print p-10 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                    មិនទាន់មាន DVR ត្រូវបានជ្រើសរើសសម្រាប់បោះពុម្ពទេ។ សូមចុច "ជ្រើសរើសទាំងអស់" ដើម្បីបង្ហាញគ្រប់ CCTV DVR។
+                  </div>
+                ) : (
+                  printDvrs.map((dvr, idx) => {
+                    const dayImg = dvr.dayScreenshotUrl || generateSampleMonitor(dvr.channelCount, dvr.name, 'day');
+                    const nightImg = dvr.nightScreenshotUrl || generateSampleMonitor(dvr.channelCount, dvr.name, 'night');
+
+                    return (
+                      <div
+                        key={dvr.id}
+                        className={idx < printDvrs.length - 1 ? 'break-after-page' : ''}
+                      >
+                        <ZoneReportSheet
+                          dvr={dvr}
+                          cameras={dvr.cameras}
+                          inspectionDate={inspectionDate}
+                          dayScreenshot={dayImg}
+                          nightScreenshot={nightImg}
+                          pageNumber={idx + 1}
+                          totalPages={printDvrs.length}
+                          isMultiPagePacket
+                          headerConfig={headerConfig}
+                          onOpenHeaderModal={handleOpenHeaderModal}
+                          onUpdateYear={handleQuickChangeYear}
+                          onUpdateInspectionDate={date => {
+                            setInspectionDate(date);
+                            showFeedback(lang === 'km' ? `✓ បានកែប្រែកាលបរិច្ឆេទទៅជា ${date}` : `✓ Inspection date set to ${date}`);
+                          }}
+                          onToggleCheck={(camNum, shift) => handlePacketToggleCheck(dvr.id, camNum, shift)}
+                          onEditCamera={camIdx => {
+                            setEditingDvrId(dvr.id);
+                            setEditingCameraIndex(camIdx);
+                            setEditCamNameThai(dvr.cameras[camIdx].nameThai);
+                            setEditCamNameKm(dvr.cameras[camIdx].nameKm);
+                          }}
+                          onUpdateDvrCheck={partial => handleUpdateDvrCheck(dvr.id, partial)}
+                          onOpenDvrCheckModal={() => handleOpenDvrStatusModal(dvr.id)}
+                          onUpdateSymptom={symptom => handleUpdateSymptom(dvr.id, symptom)}
+                        />
+                      </div>
+                    );
+                  })
+                )}
+              </>
             );
-          })}
+          })()}
         </div>
       )}
 
@@ -2878,6 +3040,7 @@ interface ZoneReportSheetProps {
   dayScreenshot: string | null;
   nightScreenshot: string | null;
   pageNumber?: number;
+  totalPages?: number;
   isMultiPagePacket?: boolean;
   headerConfig?: ChecklistHeaderConfig;
   onOpenHeaderModal?: () => void;
@@ -2897,6 +3060,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
   dayScreenshot,
   nightScreenshot,
   pageNumber,
+  totalPages,
   isMultiPagePacket,
   headerConfig,
   onOpenHeaderModal,
@@ -2957,6 +3121,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
             : 'p-6 sm:p-8 space-y-4'
         } text-xs font-battambang`}
       >
+        <div className={isFitOnePage ? 'checklist-main-section space-y-2.5 print:space-y-1.5' : 'checklist-main-section space-y-4'}>
         {/* Header (Company Logo, Name, Year & Form Code) */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-2.5">
           <div
@@ -3032,7 +3197,11 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
             title={onOpenHeaderModal ? 'ចុចដើម្បីកែប្រែ Form Code' : undefined}
           >
             <p className="font-bold text-slate-800">{formCode}</p>
-            {pageNumber && <p className="text-slate-600 mt-0.5">Page {pageNumber}</p>}
+            {pageNumber && (
+              <p className="text-slate-600 mt-0.5 font-bold">
+                DVR {pageNumber}{totalPages ? ` / ${totalPages}` : ''}
+              </p>
+            )}
           </div>
         </div>
 
@@ -3674,6 +3843,7 @@ const ZoneReportSheet: React.FC<ZoneReportSheetProps> = ({
               <p className="font-bold text-slate-800">(ผู้จัดการทั่วไป)</p>
             </div>
           </div>
+        </div>
         </div>
 
         {/* ATTACHED EVIDENCE SECTION (Matches user requirement: Attached Day & Night Screenshots!) */}

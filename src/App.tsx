@@ -78,6 +78,7 @@ export default function App() {
   // Modals
   const [previewCamera, setPreviewCamera] = useState<Camera | null>(null);
   const [printReportData, setPrintReportData] = useState<any | null>(null);
+  const [printAllDvrTrigger, setPrintAllDvrTrigger] = useState<number>(0);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -525,8 +526,14 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handlePrintAllCCTV = () => {
+    setCurrentTab('smart-scanner');
+    setPrintAllDvrTrigger(prev => prev + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row font-sans selection:bg-sky-500 selection:text-white">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row font-sans selection:bg-sky-500 selection:text-white print:block print:min-h-0 print:bg-white print:text-black">
       {/* Sidebar Navigation with Live Health Alerts */}
       <Sidebar
         currentTab={currentTab}
@@ -545,16 +552,16 @@ export default function App() {
       />
 
       {/* Main Content Column */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-screen">
+      <div className="flex-1 min-w-0 flex flex-col min-h-screen print:block print:min-h-0">
         {/* Toast notification */}
         {toastMessage && (
-          <div className="fixed top-6 right-6 z-50 bg-sky-900 border border-sky-500 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold animate-bounce">
+          <div className="no-print fixed top-6 right-6 z-50 bg-sky-900 border border-sky-500 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold animate-bounce">
             {toastMessage}
           </div>
         )}
 
         {/* Main Body */}
-        <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6">
+        <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 print:p-0 print:m-0">
           {currentTab === 'dashboard' && (
             <DashboardView
               locations={locations}
@@ -607,6 +614,7 @@ export default function App() {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               targetDvrId={targetDvrId}
+              printAllTrigger={printAllDvrTrigger}
               onOpenHealthModal={() => setIsHealthModalOpen(true)}
             />
           )}
@@ -623,6 +631,7 @@ export default function App() {
                 setCurrentTab('smart-scanner');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
+              onPrintAllDVRs={handlePrintAllCCTV}
               onSyncFromChecklist={handleSyncCameraInspectionFromChecklist}
             />
           )}

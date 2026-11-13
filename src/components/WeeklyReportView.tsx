@@ -42,6 +42,7 @@ interface WeeklyReportViewProps {
   lang: Language;
   onOpenPrintModal: (reportData: any) => void;
   onNavigateToSmartScanner?: () => void;
+  onPrintAllDVRs?: () => void;
   onSyncFromChecklist?: (shift?: 'day' | 'night') => void;
 }
 
@@ -53,6 +54,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
   lang,
   onOpenPrintModal,
   onNavigateToSmartScanner,
+  onPrintAllDVRs,
   onSyncFromChecklist,
 }) => {
   const t = translations[lang];
@@ -393,9 +395,20 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
             <span>{t.exportExcel}</span>
           </button>
 
+          {onPrintAllDVRs && (
+            <button
+              onClick={onPrintAllDVRs}
+              className="flex items-center gap-2 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+              title="បោះពុម្ពទម្រង់ Checklist គ្រប់ CCTV DVR ទាំងអស់ / Print All CCTV DVR Checklists"
+            >
+              <Printer className="w-4 h-4" />
+              <span>{lang === 'km' ? `🖨️ បោះពុម្ពគ្រប់ CCTV DVR (${dvrProfiles.length})` : `🖨️ Print All CCTV DVR (${dvrProfiles.length})`}</span>
+            </button>
+          )}
+
           <button
             onClick={() => onOpenPrintModal(reportData)}
-            className="flex items-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
+            className="flex items-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
           >
             <Printer className="w-4 h-4" />
             <span>{t.exportPdf}</span>
