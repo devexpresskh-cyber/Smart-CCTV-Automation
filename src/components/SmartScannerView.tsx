@@ -62,12 +62,20 @@ import {
   Activity,
   AlertOctagon,
   HeartPulse,
+  ScanSearch,
+  Grid,
 } from 'lucide-react';
 import {
   getDVRHealthAlerts,
   calculateFleetHealth,
   DVRHealthAlert,
 } from '../utils/healthAlerts';
+import {
+  autoDetectCamerasFromImage,
+  AutoDetectResult,
+  GridLayoutPreset,
+  DetectionSensitivity,
+} from '../utils/cameraAutoDetect';
 
 interface SmartScannerViewProps {
   lang: Language;
@@ -159,6 +167,14 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
   // Active shift for Paste (Ctrl+V) target: defaults to 'day'
   const [activePasteShift, setActivePasteShift] = useState<'day' | 'night'>('day');
+
+  // Auto-Detect Camera Vision States
+  const [dayDetectResult, setDayDetectResult] = useState<AutoDetectResult | null>(null);
+  const [nightDetectResult, setNightDetectResult] = useState<AutoDetectResult | null>(null);
+  const [dayGridPreset, setDayGridPreset] = useState<GridLayoutPreset>('auto');
+  const [nightGridPreset, setNightGridPreset] = useState<GridLayoutPreset>('auto');
+  const [detectSensitivity, setDetectSensitivity] = useState<DetectionSensitivity>('normal');
+  const [showDetectOverlay, setShowDetectOverlay] = useState<boolean>(true);
 
   // DVR fleet filter: 'all' or 'alerts'
   const [dvrFilter, setDvrFilter] = useState<'all' | 'alerts'>('all');
@@ -489,7 +505,13 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     });
   }, []);
 
-  // Sync state when active DVR changes
+  // Reset auto-detect overlay state only when switching to another DVR
+  useEffect(() => {
+    setDayDetectResult(null);
+    setNightDetectResult(null);
+  }, [activeDvrId]);
+
+  // Sync state when active DVR or profiles change
   useEffect(() => {
     if (activeDvr) {
       setChannelCount(activeDvr.channelCount);
@@ -640,74 +662,37 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
     return dataUrl;
   }
 
-  // Vision analyzer that inspects image and automatically checks Day or Night boxes
+  // Smart CV analyzer that detects SmartPSS sidebar/timeline, grid (4x4, 6x6, 8x4...), and black-screen cameras
   const scanScreenshotForShift = (
     imgElement: HTMLImageElement,
     targetShift: 'day' | 'night',
     totalCh: number,
-    colsCount: number,
-    rowsCount: number
+    _colsCount: number,
+    _rowsCount: number,
+    overridePreset?: GridLayoutPreset,
+    overrideSensitivity?: DetectionSensitivity
   ) => {
     targetShift === 'day' ? setIsAnalyzingDay(true) : setIsAnalyzingNight(true);
 
-    const canvas = document.createElement('canvas');
-    canvas.width = imgElement.naturalWidth || imgElement.width || 800;
-    canvas.height = imgElement.naturalHeight || imgElement.height || 450;
-    const ctx = canvas.getContext('2d');
+    const preset = overridePreset ?? (targetShift === 'day' ? dayGridPreset : nightGridPreset);
+    const sensitivity = overrideSensitivity ?? detectSensitivity;
 
-    if (!ctx) {
-      targetShift === 'day' ? setIsAnalyzingDay(false) : setIsAnalyzingNight(false);
-      return;
+    const detection = autoDetectCamerasFromImage(imgElement, {
+      channelCount: totalCh,
+      gridPreset: preset,
+      sensitivity,
+    });
+
+    if (targetShift === 'day') {
+      setDayDetectResult(detection);
+    } else {
+      setNightDetectResult(detection);
     }
 
-    ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
-
-    const leftOffsetRatio = 0.11;
-    const topOffsetRatio = 0.05;
-    const startX = canvas.width * leftOffsetRatio;
-    const startY = canvas.height * topOffsetRatio;
-    const gridW = canvas.width - startX;
-    const gridH = canvas.height - startY;
-
-    const cellW = gridW / colsCount;
-    const cellH = gridH / rowsCount;
-
-    const resultsMap: Record<number, { isBlackScreen: boolean }> = {};
-
-    for (let idx = 0; idx < totalCh; idx++) {
-      const r = Math.floor(idx / colsCount);
-      const c = idx % colsCount;
-
-      const sampleX = Math.floor(startX + c * cellW + cellW * 0.25);
-      const sampleY = Math.floor(startY + r * cellH + cellH * 0.25);
-      const sampleW = Math.max(10, Math.floor(cellW * 0.5));
-      const sampleH = Math.max(10, Math.floor(cellH * 0.5));
-
-      let isBlackScreen = false;
-
-      try {
-        const imageData = ctx.getImageData(sampleX, sampleY, sampleW, sampleH);
-        const data = imageData.data;
-        let totalBrightness = 0;
-        let maxVal = 0;
-        let minVal = 255;
-
-        for (let p = 0; p < data.length; p += 4) {
-          const brightness = data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114;
-          totalBrightness += brightness;
-          if (brightness > maxVal) maxVal = brightness;
-          if (brightness < minVal) minVal = brightness;
-        }
-
-        const avgBrightness = totalBrightness / (data.length / 4);
-        const variance = maxVal - minVal;
-        isBlackScreen = avgBrightness < 25 && variance < 20;
-      } catch (e) {
-        console.error(e);
-      }
-
-      resultsMap[idx] = { isBlackScreen };
-    }
+    const cellMap: Record<number, 'ok' | 'issue'> = {};
+    detection.cells.forEach(cell => {
+      cellMap[cell.channelNumber] = cell.status;
+    });
 
     setTimeout(() => {
       saveDVRProfiles(prev => {
@@ -716,8 +701,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
         // Preserve all existing camera names and properties, update only shift status!
         const updatedCameras = targetDvr.cameras.map((cam, idx) => {
-          if (idx < totalCh && resultsMap[idx]) {
-            const isBlack = resultsMap[idx].isBlackScreen;
+          const chNum = cam.number || idx + 1;
+          if (cellMap[chNum] !== undefined) {
+            const isBlack = cellMap[chNum] === 'issue';
             return {
               ...cam,
               dayStatus: targetShift === 'day' ? (isBlack ? 'issue' : 'ok') : cam.dayStatus,
@@ -746,22 +732,58 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
       });
 
       targetShift === 'day' ? setIsAnalyzingDay(false) : setIsAnalyzingNight(false);
-      showFeedback(`✓ ស្កេនរូបថត ${targetShift === 'day' ? 'ពេលថ្ងៃ' : 'ពេលយប់'} និង Update Checklist រួចរាល់!`);
-    }, 400);
+
+      const shiftLabel = targetShift === 'day' ? 'ពេលថ្ងៃ (Day)' : 'ពេលយប់ (Night)';
+      const issueList = detection.issueChannels.map(n => `C${n}`).join(', ');
+      showFeedback(
+        detection.issueCount > 0
+          ? `🔍 Auto Detect ${shiftLabel}: Grid ${detection.cols}×${detection.rows} (${detection.scannedChannels} CH) • ${detection.okCount} OK • ${detection.issueCount} Black Screen [${issueList}]`
+          : `🔍 Auto Detect ${shiftLabel}: Grid ${detection.cols}×${detection.rows} (${detection.scannedChannels} CH) • ${detection.okCount}/${detection.scannedChannels} ធម្មតាទាំងអស់ ✓`
+      );
+    }, 250);
   };
 
-  // Upload or Paste Day Screenshot with instant compression to ~25KB
+  // Re-run Auto Detect Camera on demand for Day, Night, or Both
+  const handleRunAutoDetect = (
+    target: 'day' | 'night' | 'both',
+    overrideDayPreset?: GridLayoutPreset,
+    overrideNightPreset?: GridLayoutPreset,
+    overrideSensitivity?: DetectionSensitivity
+  ) => {
+    const runForShift = (shift: 'day' | 'night') => {
+      const src = shift === 'day' ? dayScreenshot : nightScreenshot;
+      if (!src) return;
+      const img = new Image();
+      img.onload = () =>
+        scanScreenshotForShift(
+          img,
+          shift,
+          channelCount,
+          gridCols,
+          gridRows,
+          shift === 'day' ? overrideDayPreset : overrideNightPreset,
+          overrideSensitivity
+        );
+      img.src = src;
+    };
+
+    if (target === 'day' || target === 'both') runForShift('day');
+    if (target === 'night' || target === 'both') runForShift('night');
+    setShowDetectOverlay(true);
+  };
+
+  // Upload or Paste Day Screenshot with crisp resolution for 32CH grid detection
   const handleDayImageSelect = async (fileOrUrl: File | string) => {
-    const compressed = await compressImage(fileOrUrl, 800, 0.65);
+    const compressed = await compressImage(fileOrUrl, 1200, 0.72);
     setDayScreenshot(compressed);
     const img = new Image();
     img.onload = () => scanScreenshotForShift(img, 'day', channelCount, gridCols, gridRows);
     img.src = compressed;
   };
 
-  // Upload or Paste Night Screenshot with instant compression to ~25KB
+  // Upload or Paste Night Screenshot with crisp resolution for 32CH grid detection
   const handleNightImageSelect = async (fileOrUrl: File | string) => {
-    const compressed = await compressImage(fileOrUrl, 800, 0.65);
+    const compressed = await compressImage(fileOrUrl, 1200, 0.72);
     setNightScreenshot(compressed);
     const img = new Image();
     img.onload = () => scanScreenshotForShift(img, 'night', channelCount, gridCols, gridRows);
@@ -844,7 +866,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
 
     window.addEventListener('paste', handleGlobalPaste);
     return () => window.removeEventListener('paste', handleGlobalPaste);
-  }, [activePasteShift, channelCount, gridCols, gridRows, activeDvrId]);
+  }, [activePasteShift, channelCount, gridCols, gridRows, activeDvrId, dayGridPreset, nightGridPreset, detectSensitivity]);
 
   // One-click: Auto-generate Sample Screenshots & Audit for ALL DVRs!
   const handlePreloadAllDVRs = () => {
@@ -1658,35 +1680,77 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
             </div>
           </div>
 
-          {/* 🎯 Quick Paste Target Switcher & Shortcuts Guide */}
+          {/* 🎯 Quick Paste Target Switcher & Auto-Detect Camera Controls */}
           <div className="no-print bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400 font-bold">
                 <Clipboard className="w-4 h-4" />
               </span>
               <div>
-                <span className="font-bold text-white">គោលដៅ Paste Screenshot (Ctrl+V Target):</span>
+                <span className="font-bold text-white">គោលដៅ Paste & Auto Detect Camera:</span>
                 <p className="text-[10px] text-slate-400">
-                  ចុចលើប្រអប់ Day ឬ Night ឬចុចប៊ូតុងខាងក្រោម ដើម្បីកំណត់គោលដៅទទួលរូបភាពពេលចុច <kbd className="px-1 py-0.2 bg-slate-800 border border-slate-700 rounded text-slate-200 font-mono">Ctrl+V</kbd>
+                  ចុចលើប្រអប់ Day ឬ Night រួច <kbd className="px-1 py-0.2 bg-slate-800 border border-slate-700 rounded text-slate-200 font-mono">Ctrl+V</kbd> ឬចុច <strong className="text-sky-300">Auto Detect Camera</strong> ដើម្បីស្កេនកាមេរ៉ាស្វ័យប្រវត្តិ
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Auto Detect All Cameras (Day + Night) */}
+              <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl p-1">
+                <select
+                  value={detectSensitivity}
+                  onChange={e => {
+                    const sens = e.target.value as DetectionSensitivity;
+                    setDetectSensitivity(sens);
+                    handleRunAutoDetect('both', undefined, undefined, sens);
+                  }}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 font-semibold focus:outline-none focus:border-sky-500"
+                  title="កម្រិតភាពរសើបនៃការស្កេន Black Screen / Detection Sensitivity"
+                >
+                  <option value="normal">Sensitivity: Normal</option>
+                  <option value="strict">Sensitivity: Strict (Dim/Dark)</option>
+                  <option value="high">Sensitivity: Pure Black Only</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => setShowDetectOverlay(v => !v)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                    showDetectOverlay
+                      ? 'bg-sky-950/80 text-sky-300 border-sky-500/50'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                  }`}
+                  title="បង្ហាញ ឬលាក់ប្រអប់ Grid ស្កេនកាមេរ៉ាលើរូបភាព / Toggle Grid Overlay"
+                >
+                  <Grid className="w-3 h-3" />
+                  <span>{showDetectOverlay ? 'Grid ON' : 'Grid OFF'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunAutoDetect('both')}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 text-white rounded-lg text-[11px] font-extrabold shadow-sm transition cursor-pointer"
+                  title="ស្កេន និងចាប់យកទីតាំងកាមេរ៉ាស្វ័យប្រវត្តិទាំងពេលថ្ងៃ និងពេលយប់ / Auto Detect Cameras (Day & Night)"
+                >
+                  <ScanSearch className="w-3.5 h-3.5" />
+                  <span>🔍 Auto Detect Camera</span>
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={() => {
                   setActivePasteShift('day');
                   showFeedback('🎯 គោលដៅ Paste ត្រូវបានកំណត់ជា: ☀️ Screenshot ពេលថ្ងៃ (Day Shift)');
                 }}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-bold transition text-xs border ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition text-xs border cursor-pointer ${
                   activePasteShift === 'day'
                     ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-950/30'
                     : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
                 }`}
               >
                 <Sun className="w-3.5 h-3.5" />
-                <span>☀️ ពេលថ្ងៃ (Day Shift)</span>
+                <span>☀️ ពេលថ្ងៃ</span>
                 {activePasteShift === 'day' && <span className="font-mono text-[10px] bg-slate-950 text-amber-300 px-1 rounded">Active ✓</span>}
               </button>
 
@@ -1696,14 +1760,14 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                   setActivePasteShift('night');
                   showFeedback('🎯 គោលដៅ Paste ត្រូវបានកំណត់ជា: 🌙 Screenshot ពេលយប់ (Night Shift)');
                 }}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-bold transition text-xs border ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition text-xs border cursor-pointer ${
                   activePasteShift === 'night'
                     ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-950/30'
                     : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
                 }`}
               >
                 <Moon className="w-3.5 h-3.5" />
-                <span>🌙 ពេលយប់ (Night Shift)</span>
+                <span>🌙 ពេលយប់</span>
                 {activePasteShift === 'night' && <span className="font-mono text-[10px] bg-white text-indigo-700 px-1 rounded">Active ✓</span>}
               </button>
             </div>
@@ -1740,7 +1804,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 }
               }}
             >
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <div className={`p-1.5 rounded-lg ${activePasteShift === 'day' ? 'bg-amber-500 text-slate-950' : 'bg-amber-500/20 text-amber-400'}`}>
                     <Sun className="w-4 h-4" />
@@ -1756,23 +1820,55 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Checklist សម្រាប់ជួរ "ตอนวัน" • ចុច Ctrl+V ដើម្បី Paste ភ្លាមៗ</p>
+                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Detect Camera សម្រាប់ជួរ "ตอนวัน" • Ctrl+V Paste</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {/* Dedicated Paste Day Button */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <select
+                    value={dayGridPreset}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => {
+                      e.stopPropagation();
+                      const preset = e.target.value as GridLayoutPreset;
+                      setDayGridPreset(preset);
+                      handleRunAutoDetect('day', preset, undefined);
+                    }}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-amber-300 font-semibold focus:outline-none"
+                    title="ជ្រើសរើសទម្រង់ Grid ពេលថ្ងៃ / Day Grid Layout"
+                  >
+                    <option value="auto">Grid: Auto</option>
+                    <option value="smartpss-live-6x6">SmartPSS 6×6 (32CH)</option>
+                    <option value="grid-8x4">Grid 8×4 (32CH)</option>
+                    <option value="grid-5x5">Grid 5×5 (25CH)</option>
+                    <option value="grid-4x4">Grid 4×4 (16CH)</option>
+                    <option value="grid-3x3">Grid 3×3 (9CH)</option>
+                    <option value="grid-4x2">Grid 4×2 (8CH)</option>
+                    <option value="grid-2x2">Grid 2×2 (4CH)</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleRunAutoDetect('day');
+                    }}
+                    className="px-2.5 py-1 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/50 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                    title="Auto Detect Cameras in Day Screenshot"
+                  >
+                    <ScanSearch className="w-3 h-3" />
+                    <span>Auto Detect</span>
+                  </button>
                   <button
                     type="button"
                     onClick={e => {
                       e.stopPropagation();
                       handleDirectPasteClick('day');
                     }}
-                    className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                    className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
                     title="Paste Day Screenshot from Clipboard (Ctrl+V)"
                   >
                     <Clipboard className="w-3 h-3" />
-                    <span>📋 Paste Day</span>
+                    <span>Paste</span>
                   </button>
                   <button
                     type="button"
@@ -1780,9 +1876,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                       e.stopPropagation();
                       handleDayImageSelect(generateSampleMonitor(channelCount, activeDvr.name, 'day'));
                     }}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg text-[10px] font-bold"
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg text-[10px] font-bold"
                   >
-                    ⚡ Sample Day
+                    ⚡ Sample
                   </button>
                   <button
                     type="button"
@@ -1790,7 +1886,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                       e.stopPropagation();
                       dayFileInputRef.current?.click();
                     }}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold flex items-center gap-1"
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold flex items-center gap-1"
                   >
                     <Upload className="w-3 h-3" />
                     <span>Upload</span>
@@ -1805,16 +1901,68 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 </div>
               </div>
 
-              {/* Day Image Preview Container */}
+              {/* Day Image Preview Container + Visual Auto-Detect Grid Overlay */}
               <div
                 className="relative aspect-video rounded-xl bg-black border border-slate-800 overflow-hidden group flex items-center justify-center cursor-pointer"
                 onClick={() => {
                   setActivePasteShift('day');
-                  dayFileInputRef.current?.click();
+                  if (!dayScreenshot) dayFileInputRef.current?.click();
                 }}
               >
                 {dayScreenshot ? (
-                  <img src={dayScreenshot} alt="Day Screenshot" className="w-full h-full object-contain" />
+                  <div className="relative inline-flex max-w-full max-h-full items-center justify-center">
+                    <img src={dayScreenshot} alt="Day Screenshot" className="block max-w-full max-h-full w-auto h-auto object-contain select-none" />
+                    {showDetectOverlay && dayDetectResult && (
+                      <div className="absolute inset-0 pointer-events-none">
+                        {/* Detected Grid Bounds */}
+                        <div
+                          className="absolute border border-sky-400/70"
+                          style={{
+                            left: `${dayDetectResult.gridBounds.left * 100}%`,
+                            top: `${dayDetectResult.gridBounds.top * 100}%`,
+                            width: `${(dayDetectResult.gridBounds.right - dayDetectResult.gridBounds.left) * 100}%`,
+                            height: `${(dayDetectResult.gridBounds.bottom - dayDetectResult.gridBounds.top) * 100}%`,
+                          }}
+                        />
+                        {dayDetectResult.cells.map(cell => {
+                          const cam = cameras.find(c => c.number === cell.channelNumber);
+                          const isOk = cam ? cam.dayStatus === 'ok' : cell.status === 'ok';
+                          return (
+                            <button
+                              key={cell.channelNumber}
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleToggleCheck(cell.channelNumber, 'day');
+                              }}
+                              className={`pointer-events-auto absolute border transition flex items-start justify-start p-0.5 cursor-pointer ${
+                                isOk
+                                  ? 'border-emerald-400/60 hover:bg-emerald-500/15'
+                                  : 'border-rose-500 bg-rose-600/30 hover:bg-rose-500/40'
+                              }`}
+                              style={{
+                                left: `${cell.box.x * 100}%`,
+                                top: `${cell.box.y * 100}%`,
+                                width: `${cell.box.w * 100}%`,
+                                height: `${cell.box.h * 100}%`,
+                              }}
+                              title={`CAM ${cell.channelNumber}: ${isOk ? 'OK' : 'Black Screen'} (Lum ${cell.metrics.meanLum}, Edge ${(cell.metrics.edgeDensity * 100).toFixed(1)}%) — ចុចដើម្បីប្តូរ`}
+                            >
+                              <span
+                                className={`px-1 rounded text-[8px] font-mono font-extrabold leading-tight shadow-xs ${
+                                  isOk
+                                    ? 'bg-emerald-950/85 text-emerald-300 border border-emerald-500/50'
+                                    : 'bg-rose-600 text-white border border-rose-300 animate-pulse'
+                                }`}
+                              >
+                                {cell.channelNumber}{isOk ? '✓' : '✖'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div className="text-center p-4 text-slate-500 space-y-1">
                     <Sun className="w-8 h-8 mx-auto opacity-40 text-amber-400 mb-1" />
@@ -1824,7 +1972,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 )}
 
                 {activePasteShift === 'day' && (
-                  <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 text-[10px] font-extrabold shadow-md flex items-center gap-1">
+                  <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 text-[10px] font-extrabold shadow-md flex items-center gap-1 pointer-events-none">
                     <Clipboard className="w-3 h-3" />
                     <span>🎯 គោលដៅ Ctrl+V Active</span>
                   </div>
@@ -1833,21 +1981,27 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 {isAnalyzingDay && (
                   <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center text-white z-20">
                     <RefreshCw className="w-6 h-6 text-amber-400 animate-spin mb-1" />
-                    <p className="text-xs font-bold font-mono">SCANNING DAY CHANNELS...</p>
+                    <p className="text-xs font-bold font-mono">AUTO-DETECTING DAY CAMERAS...</p>
                   </div>
                 )}
 
                 {dayScreenshot && (
-                  <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-0.5 rounded text-[10px] font-mono text-amber-300 border border-white/10">
-                    ✓ Attached Day Evidence
+                  <div className="absolute bottom-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[10px] font-mono text-amber-300 border border-white/10 pointer-events-none">
+                    {dayDetectResult
+                      ? `✓ Grid ${dayDetectResult.cols}×${dayDetectResult.rows} • ${dayDetectResult.okCount} OK / ${dayDetectResult.issueCount} Issue`
+                      : '✓ Attached Day Evidence'}
                   </div>
                 )}
               </div>
 
               {/* Quick Channel Toggles for Day Shift */}
               <div className="pt-2 border-t border-slate-800/80">
-                <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
-                  <span>ចុចលើ Channel ដើម្បីប្តូរស្ថានភាពពេលថ្ងៃ (1-Click Toggle):</span>
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-400 mb-1.5">
+                  <span>
+                    {dayDetectResult
+                      ? `🔍 Auto Detected (${dayDetectResult.layoutType}): ${dayDetectResult.scannedChannels} CH`
+                      : 'ចុចលើ Channel ដើម្បីប្តូរស្ថានភាពពេលថ្ងៃ (1-Click Toggle):'}
+                  </span>
                   <span className="text-emerald-400">បៃតង = ធម្មតា • ក្រហម = អេក្រង់ខ្មៅ</span>
                 </div>
                 <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto scrollbar-thin">
@@ -1904,7 +2058,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 }
               }}
             >
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <div className={`p-1.5 rounded-lg ${activePasteShift === 'night' ? 'bg-indigo-600 text-white' : 'bg-indigo-500/20 text-indigo-400'}`}>
                     <Moon className="w-4 h-4" />
@@ -1920,23 +2074,56 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Checklist សម្រាប់ជួរ "ตอนคืน" • ចុច Ctrl+V ដើម្បី Paste ភ្លាមៗ</p>
+                    <p className="text-[10px] text-slate-400">ស្កេន Auto-Detect Camera សម្រាប់ជួរ "ตอนคืน" • Ctrl+V Paste</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {/* Dedicated Paste Night Button */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <select
+                    value={nightGridPreset}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => {
+                      e.stopPropagation();
+                      const preset = e.target.value as GridLayoutPreset;
+                      setNightGridPreset(preset);
+                      handleRunAutoDetect('night', undefined, preset);
+                    }}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-indigo-300 font-semibold focus:outline-none"
+                    title="ជ្រើសរើសទម្រង់ Grid ពេលយប់ / Night Grid Layout"
+                  >
+                    <option value="auto">Grid: Auto</option>
+                    <option value="smartpss-playback-4x4">Playback 4×4 (16CH)</option>
+                    <option value="smartpss-live-6x6">SmartPSS 6×6 (32CH)</option>
+                    <option value="grid-8x4">Grid 8×4 (32CH)</option>
+                    <option value="grid-5x5">Grid 5×5 (25CH)</option>
+                    <option value="grid-4x4">Grid 4×4 (16CH)</option>
+                    <option value="grid-3x3">Grid 3×3 (9CH)</option>
+                    <option value="grid-4x2">Grid 4×2 (8CH)</option>
+                    <option value="grid-2x2">Grid 2×2 (4CH)</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleRunAutoDetect('night');
+                    }}
+                    className="px-2.5 py-1 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/50 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                    title="Auto Detect Cameras in Night Screenshot"
+                  >
+                    <ScanSearch className="w-3 h-3" />
+                    <span>Auto Detect</span>
+                  </button>
                   <button
                     type="button"
                     onClick={e => {
                       e.stopPropagation();
                       handleDirectPasteClick('night');
                     }}
-                    className="px-2.5 py-1 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                    className="px-2 py-1 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
                     title="Paste Night Screenshot from Clipboard (Ctrl+V)"
                   >
                     <Clipboard className="w-3 h-3" />
-                    <span>📋 Paste Night</span>
+                    <span>Paste</span>
                   </button>
                   <button
                     type="button"
@@ -1944,9 +2131,9 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                       e.stopPropagation();
                       handleNightImageSelect(generateSampleMonitor(channelCount, activeDvr.name, 'night'));
                     }}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded-lg text-[10px] font-bold"
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded-lg text-[10px] font-bold"
                   >
-                    ⚡ Sample Night
+                    ⚡ Sample
                   </button>
                   <button
                     type="button"
@@ -1954,7 +2141,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                       e.stopPropagation();
                       nightFileInputRef.current?.click();
                     }}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold flex items-center gap-1"
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold flex items-center gap-1"
                   >
                     <Upload className="w-3 h-3" />
                     <span>Upload</span>
@@ -1969,16 +2156,68 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 </div>
               </div>
 
-              {/* Night Image Preview Container */}
+              {/* Night Image Preview Container + Visual Auto-Detect Grid Overlay */}
               <div
                 className="relative aspect-video rounded-xl bg-black border border-slate-800 overflow-hidden group flex items-center justify-center cursor-pointer"
                 onClick={() => {
                   setActivePasteShift('night');
-                  nightFileInputRef.current?.click();
+                  if (!nightScreenshot) nightFileInputRef.current?.click();
                 }}
               >
                 {nightScreenshot ? (
-                  <img src={nightScreenshot} alt="Night Screenshot" className="w-full h-full object-contain" />
+                  <div className="relative inline-flex max-w-full max-h-full items-center justify-center">
+                    <img src={nightScreenshot} alt="Night Screenshot" className="block max-w-full max-h-full w-auto h-auto object-contain select-none" />
+                    {showDetectOverlay && nightDetectResult && (
+                      <div className="absolute inset-0 pointer-events-none">
+                        {/* Detected Grid Bounds */}
+                        <div
+                          className="absolute border border-sky-400/70"
+                          style={{
+                            left: `${nightDetectResult.gridBounds.left * 100}%`,
+                            top: `${nightDetectResult.gridBounds.top * 100}%`,
+                            width: `${(nightDetectResult.gridBounds.right - nightDetectResult.gridBounds.left) * 100}%`,
+                            height: `${(nightDetectResult.gridBounds.bottom - nightDetectResult.gridBounds.top) * 100}%`,
+                          }}
+                        />
+                        {nightDetectResult.cells.map(cell => {
+                          const cam = cameras.find(c => c.number === cell.channelNumber);
+                          const isOk = cam ? cam.nightStatus === 'ok' : cell.status === 'ok';
+                          return (
+                            <button
+                              key={cell.channelNumber}
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleToggleCheck(cell.channelNumber, 'night');
+                              }}
+                              className={`pointer-events-auto absolute border transition flex items-start justify-start p-0.5 cursor-pointer ${
+                                isOk
+                                  ? 'border-emerald-400/60 hover:bg-emerald-500/15'
+                                  : 'border-rose-500 bg-rose-600/30 hover:bg-rose-500/40'
+                              }`}
+                              style={{
+                                left: `${cell.box.x * 100}%`,
+                                top: `${cell.box.y * 100}%`,
+                                width: `${cell.box.w * 100}%`,
+                                height: `${cell.box.h * 100}%`,
+                              }}
+                              title={`CAM ${cell.channelNumber}: ${isOk ? 'OK' : 'Black Screen'} (Lum ${cell.metrics.meanLum}, Edge ${(cell.metrics.edgeDensity * 100).toFixed(1)}%) — ចុចដើម្បីប្តូរ`}
+                            >
+                              <span
+                                className={`px-1 rounded text-[8px] font-mono font-extrabold leading-tight shadow-xs ${
+                                  isOk
+                                    ? 'bg-emerald-950/85 text-emerald-300 border border-emerald-500/50'
+                                    : 'bg-rose-600 text-white border border-rose-300 animate-pulse'
+                                }`}
+                              >
+                                {cell.channelNumber}{isOk ? '✓' : '✖'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div className="text-center p-4 text-slate-500 space-y-1">
                     <Moon className="w-8 h-8 mx-auto opacity-40 text-indigo-400 mb-1" />
@@ -1988,7 +2227,7 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 )}
 
                 {activePasteShift === 'night' && (
-                  <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[10px] font-extrabold shadow-md flex items-center gap-1">
+                  <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[10px] font-extrabold shadow-md flex items-center gap-1 pointer-events-none">
                     <Clipboard className="w-3 h-3" />
                     <span>🎯 គោលដៅ Ctrl+V Active</span>
                   </div>
@@ -1997,21 +2236,27 @@ export const SmartScannerView: React.FC<SmartScannerViewProps> = ({
                 {isAnalyzingNight && (
                   <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center text-white z-20">
                     <RefreshCw className="w-6 h-6 text-indigo-400 animate-spin mb-1" />
-                    <p className="text-xs font-bold font-mono">SCANNING NIGHT CHANNELS...</p>
+                    <p className="text-xs font-bold font-mono">AUTO-DETECTING NIGHT CAMERAS...</p>
                   </div>
                 )}
 
                 {nightScreenshot && (
-                  <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-0.5 rounded text-[10px] font-mono text-indigo-300 border border-white/10">
-                    ✓ Attached Night Evidence
+                  <div className="absolute bottom-2 left-2 bg-black/75 px-2 py-0.5 rounded text-[10px] font-mono text-indigo-300 border border-white/10 pointer-events-none">
+                    {nightDetectResult
+                      ? `✓ Grid ${nightDetectResult.cols}×${nightDetectResult.rows} • ${nightDetectResult.okCount} OK / ${nightDetectResult.issueCount} Issue`
+                      : '✓ Attached Night Evidence'}
                   </div>
                 )}
               </div>
 
               {/* Quick Channel Toggles for Night Shift */}
               <div className="pt-2 border-t border-slate-800/80">
-                <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
-                  <span>ចុចលើ Channel ដើម្បីប្តូរស្ថានភាពពេលយប់ (1-Click Toggle):</span>
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-400 mb-1.5">
+                  <span>
+                    {nightDetectResult
+                      ? `🔍 Auto Detected (${nightDetectResult.layoutType}): ${nightDetectResult.scannedChannels} CH`
+                      : 'ចុចលើ Channel ដើម្បីប្តូរស្ថានភាពពេលយប់ (1-Click Toggle):'}
+                  </span>
                   <span className="text-indigo-400">បៃតង = ធម្មតា • ក្រហម = អេក្រង់ខ្មៅ</span>
                 </div>
                 <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto scrollbar-thin">
